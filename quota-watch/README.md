@@ -2,7 +2,8 @@
 
 - **Two tools:** Claude Code and Codex.
 - **Local, macOS only:** one Python script and a LaunchAgent on your Mac. No server or account of its own.
-- **No credentials:** it never reads, copies or stores your Claude or Codex credentials, and writes no credential anywhere. It asks each tool through that tool's own command (`claude /usage`, `codex app-server`), which uses the login it already has. It parses Claude Code's `~/.claude.json` for a single key, `cachedUsageUtilization` (percentages and reset times), and keeps nothing else from it. The only secret it handles is the Telegram bot token you give it, to send the messages.
+- **No credentials of its own:** it never opens your Claude or Codex auth files, and writes no credential anywhere. It asks each tool through that tool's own command (`claude /usage`, `codex app-server`), and those commands run on the login they already have, with the same access as always: quota-watch does not sandbox them. It loads the whole of Claude Code's `~/.claude.json` to pick out one key, `cachedUsageUtilization` (percentages and reset times), and keeps nothing else from it. When the app-server can't answer, and on the first run to seed history, it reads Codex's local session logs, which hold your conversations, and keeps only the rate-limit numbers. The only secret it handles is the Telegram bot token you give it, to send the messages.
+- **Audited:** Astra's [safety review](SAFETY-REVIEW.md) of 21 September 2026 found no critical or high-severity security issue. It found five other defects that are still open, listed under [Limits](#limits).
 
 **A weekly allowance that resets at 77% is 23% of a subscription thrown away.** The limit resets whether you used it or not.
 
@@ -21,7 +22,7 @@ Every hour it:
 3. **Projects the close of each week** with two paces: the average since the window opened, and the last 24 hours from history. It judges on the busier of the two, so a nudge means even your heavier recent habit leaves quota on the table.
 4. **Sends a nudge** if a checkpoint is due.
 
-Neither read spends quota. The `/usage` run reports `num_turns 0`, zero tokens and $0. quota-watch reads no token and no credential file. Claude Code and Codex each answer on their own login.
+Neither read spends quota. The `/usage` run reports `num_turns 0`, zero tokens and $0. quota-watch opens no auth file. Claude Code and Codex each answer on their own login.
 
 ## How it notifies you
 
@@ -99,6 +100,7 @@ codenotch is plainly better at everything else: a glanceable view, many provider
 
 ## Limits
 
+- **Five known defects.** Astra's [safety review](SAFETY-REVIEW.md) found them on 21 September 2026, and none is fixed yet. The Codex read can hang past its timeout or miss a reply. A window nudge can recommend heavy work on hours-old readings. A failed notification is still marked as sent, and never retried. `CODEX_HOME` or `CLAUDE_CONFIG_DIR` set only in `~/.config/quota-watch/env` doesn't reach `claude` or `codex`, so a reading can come from the wrong account. A reinstall from a path containing characters like `&` can leave the LaunchAgent stopped. The review's advice: fix them before depending on unattended monitoring.
 - **Two tools.** Claude Code and Codex. A 5-hour window nudges only while its week is behind; on a week that's on pace it stays silent.
 - **Hourly ticks can miss a window.** The window nudge needs a tick inside the 90 minutes before a reset. A Mac asleep through that stretch sends nothing.
 - **"More hours like…" assumes you can repeat that hour.** It is your biggest one-hour rise of the last two weeks, and it only appears if that rise was at least 5 points.
@@ -166,7 +168,8 @@ All optional, in the environment or in `~/.config/quota-watch/env`:
 
 - **Два інструменти:** Claude Code і Codex.
 - **Локально, лише macOS:** один Python-скрипт і LaunchAgent на вашому Маку. Жодного власного сервера чи акаунта.
-- **Жодних облікових даних:** він не читає, не копіює і не зберігає облікових даних Claude чи Codex і ніде їх не записує. Кожен інструмент він питає через його власну команду (`claude /usage`, `codex app-server`), яка працює на вже наявному логіні. Із файлу Claude Code `~/.claude.json` він бере один ключ, `cachedUsageUtilization` (відсотки й час скидання), і нічого іншого звідти не зберігає. Він торкається лише одного секрету: токена Телеграм-бота, який ви самі даєте йому для надсилання повідомлень.
+- **Жодних власних облікових даних:** він не відкриває файлів авторизації Claude чи Codex і ніде не записує облікових даних. Кожен інструмент він питає через його власну команду (`claude /usage`, `codex app-server`), а ці команди працюють на вже наявному логіні з тим самим доступом, що й завжди: quota-watch їх не ізолює. Файл Claude Code `~/.claude.json` він завантажує цілком, щоб узяти один ключ, `cachedUsageUtilization` (відсотки й час скидання), і нічого іншого звідти не зберігає. Коли app-server не відповідає, а також під час першого запуску, щоб заповнити історію, він читає локальні логи сесій Codex, де зберігаються ваші розмови, і бере з них лише цифри лімітів. Він торкається лише одного секрету: токена Телеграм-бота, який ви самі даєте йому для надсилання повідомлень.
+- **Перевірено:** [аудит безпеки](SAFETY-REVIEW.md) від Astra 21 вересня 2026 року не знайшов критичних чи серйозних проблем безпеки. Він знайшов п'ять інших вад, які ще не виправлено: вони в розділі [Обмеження](#обмеження).
 
 **Якщо тижневий ліміт скинувся на 77%, то 23% підписки пішли на смітник.** Ліміт скидається незалежно від того, використали ви його чи ні.
 
@@ -183,7 +186,7 @@ quota-watch щогодини читає обидва тижневі ліміти
 3. **Прогнозує, як закриється тиждень,** за двома темпами: середнім від початку вікна і за останні 24 години з історії. Орієнтується на вищий із двох. Тож нагадування означає, що навіть ваш інтенсивніший останній темп лишає квоту невикористаною.
 4. **Надсилає нагадування,** якщо настала контрольна точка.
 
-Жодне читання не витрачає квоту. Запуск `/usage` показує `num_turns 0`, нуль токенів і $0. quota-watch не читає жодних токенів і жодних файлів із ключами. Claude Code і Codex відповідають кожен через власний логін.
+Жодне читання не витрачає квоту. Запуск `/usage` показує `num_turns 0`, нуль токенів і $0. quota-watch не відкриває файлів авторизації. Claude Code і Codex відповідають кожен через власний логін.
 
 ## Як він вас сповістить
 
@@ -261,6 +264,7 @@ quota-watch відрізняється чотирма речами. Підозр
 
 ## Обмеження
 
+- **П'ять відомих вад.** [Аудит безпеки](SAFETY-REVIEW.md) від Astra знайшов їх 21 вересня 2026 року, і жодну ще не виправлено. Читання Codex може не вкластися в таймаут і зависнути або пропустити відповідь. Нагадування про вікно може радити важку роботу на підставі показань, яким уже кілька годин. Невдале сповіщення все одно позначається як надіслане, і повторної спроби не буде. `CODEX_HOME` чи `CLAUDE_CONFIG_DIR`, задані лише в `~/.config/quota-watch/env`, не доходять до `claude` і `codex`, тож показання може прийти з іншого акаунта. Перевстановлення зі шляху, де є символи на кшталт `&`, може залишити LaunchAgent зупиненим. Порада аудиту: виправити їх, перш ніж покладатися на моніторинг без нагляду.
 - **Два інструменти.** Claude Code і Codex. П'ятигодинне вікно нагадує лише тоді, коли його тиждень відстає. Якщо тиждень іде за планом, воно мовчить.
 - **Щогодинні перевірки можуть проґавити вікно.** Нагадуванню про вікно потрібна перевірка в останні 90 хвилин перед скиданням. Якщо Мак у цей час спить, нічого не прийде.
 - **«More hours like…» припускає, що ту годину можна повторити.** Це ваш найбільший приріст за годину за останні два тижні, і рядок з'являється, лише якщо він був щонайменше 5 пунктів.
