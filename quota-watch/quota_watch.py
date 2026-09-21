@@ -6,7 +6,7 @@ time to spend what is on track to expire unused.
 Sources. None of them touches a credential, and none spends quota:
   Claude  <config>/.claude.json `cachedUsageUtilization` — written by Claude Code
           itself on every usage fetch. Carries the all-models weekly limit, any
-          model-scoped one (Fable), and the window start. Left alone it goes
+          model-scoped one (Fable), the 5-hour window, and the window start. Left alone it goes
           stale (2h and 5 points behind on 2026-09-21), so it is refreshed first
           by running Claude Code's own `/usage` in print mode — no model call:
           num_turns 0, zero tokens, $0. The flags are borrowed from codenotch
@@ -91,6 +91,7 @@ CODEX_BIN = first_executable(CONFIG.get("CODEX_BIN"), shutil.which("codex"), "/o
                              "/Applications/Codex.app/Contents/Resources/codex")
 
 WEEK = 7 * 86400
+SESSION = 5 * 3600           # the short window both tools have had; see is_session()
 MIN_ELAPSED = 12 * 3600      # before this, a pace is one session's noise, not a week's habit
 GAP = float(CONFIG.get("QUOTA_WATCH_GAP", 15))  # points on track to expire before a nudge
 # Hours before reset; each fires at most once per window.
@@ -140,9 +141,11 @@ def claude_cache():
     out = []
     for lim in u.get("limits") or []:
         resets = iso(lim.get("resets_at"))
-        if lim.get("group") != "weekly" or resets is None or lim.get("percent") is None:
+        if resets is None or lim.get("percent") is None:
             continue
-        if lim.get("kind") == "weekly_all":
+        if lim.get("kind") == "session":
+            out.append(reading("claude-5h", "Claude 5h", lim["percent"], resets, at, "cache", window=SESSION))
+        elif lim.get("kind") == "weekly_all":
             out.append(reading("claude", "Claude (all models)", lim["percent"], resets, at, "cache", start))
         elif lim.get("kind") == "weekly_scoped":
             name = (((lim.get("scope") or {}).get("model") or {}).get("display_name")) or "scoped"
@@ -152,6 +155,10 @@ def claude_cache():
         sd = u.get("seven_day") or {}
         if sd.get("utilization") is not None and sd.get("resets_at"):
             out.append(reading("claude", "Claude (all models)", sd["utilization"], iso(sd["resets_at"]), at, "cache", start))
+    if not any(r["pool"] == "claude-5h" for r in out):
+        fh = u.get("five_hour") or {}
+        if fh.get("utilization") is not None and fh.get("resets_at"):
+            out.append(reading("claude-5h", "Claude 5h", fh["utilization"], iso(fh["resets_at"]), at, "cache", window=SESSION))
     return out
 
 
@@ -194,11 +201,14 @@ def codex_windows(limit_id, limit_name, windows, at, source):
         mins = w.get("windowDurationMins", w.get("window_minutes"))
         used = w.get("usedPercent", w.get("used_percent"))
         resets = w.get("resetsAt", w.get("resets_at"))
-        # Weekly only: a short (5h) window, if the plan has one, is not what goes to waste.
-        if not mins or mins < 1440 or used is None or not resets:
+        if not mins or used is None or not resets:
             continue
         pool = "codex" if limit_id in (None, "codex") else "codex-" + str(limit_id)
         label = "Codex" if pool == "codex" else "Codex " + str(limit_name or limit_id)
+        if mins < 1440:
+            # A short window (300 min on some plans; none on prolite since
+            # September 2026). Reported and used to size the week, never nudged.
+            pool, label = f"{pool}-{mins // 60}h", f"{label} {mins // 60}h"
         out.append(reading(pool, label, used, resets, at, source, window=mins * 60))
     return out
 
@@ -330,6 +340,35 @@ def same_window(a, b):
     return abs(a["resets_at"] - b["resets_at"]) < 3600
 
 
+def is_session(r):
+    """A short (5h) window rather than a week. It caps how fast the week can be
+    spent; it wastes nothing by itself, so it is never nudged on."""
+    return r["resets_at"] - r["start"] < 86400
+
+
+def window_ratio(rows, weekly, session):
+    """Weekly points one full session window is worth, measured from consecutive
+    readings that share a timestamp, a week and a session window. None until
+    at least one full window's worth (100 points) of session movement is seen:
+    the percentages are integers, and less than that is mostly rounding."""
+    by_at = {}
+    for h in rows:
+        if h["pool"] in (weekly, session):
+            by_at.setdefault(h["at"], {})[h["pool"]] = h
+    pairs = [d for _, d in sorted(by_at.items()) if len(d) == 2]
+    dw = ds = 0.0
+    for a, b in zip(pairs, pairs[1:]):
+        if (same_window(a[weekly], b[weekly]) and abs(a[session]["resets_at"] - b[session]["resets_at"]) < 600
+                and b[session]["used"] >= a[session]["used"] and b[weekly]["used"] >= a[weekly]["used"]):
+            dw += b[weekly]["used"] - a[weekly]["used"]
+            ds += b[session]["used"] - a[session]["used"]
+    return dw / ds * 100 if ds >= 100 and dw > 0 else None
+
+
+def session_pool(p, ps):
+    return next((s for s in ps if s["pool"].startswith(p["pool"] + "-") and is_session(s)), None)
+
+
 def previous_close(r, rows):
     """Highest reading of this pool's previous window — a floor, since usage
     after the last snapshot before reset was never seen."""
@@ -381,7 +420,7 @@ def project(r, rows, now):
         rate = max(x for x in (p["pace"], p["pace24"]) if x is not None)
         if busiest > 100 and rate > 0:
             p["full_at"] = r["at"] + (100 - r["used"]) / rate
-    p["prev"] = previous_close(r, rows)
+    p["prev"] = None if is_session(r) else previous_close(r, rows)
     return p
 
 
@@ -417,18 +456,30 @@ def short_name(p):
     return " " + (sub if len(sub) <= 7 else sub.rsplit("-", 1)[-1][:7])
 
 
-def table_lines(ps, extras, now):
-    """One row per weekly limit: used now, projected close, time left, and the
-    daily rate that would use the rest. Notes only for what is out of the
-    ordinary. Narrow enough for a phone screen in Telegram."""
+def windows_per_day(p, ps, rows):
+    """need/day in full session windows, when the ratio has been measured."""
+    s = session_pool(p, ps)
+    ratio = s and window_ratio(rows, p["pool"], s["pool"])
+    return (p["need"] * 86400 / ratio, ratio) if ratio else None
+
+
+def table_lines(ps, extras, now, rows=()):
+    """One row per limit: used now, projected close, time left, and the daily
+    rate that would use the rest of the week. A 5h window sits under its tool
+    with only used and left. Notes only for what is out of the ordinary.
+    Narrow enough for a phone screen in Telegram."""
     lines = [f"{'':<8}{'used':>5}{'end':>6}{'left':>7}{'need/d':>8}"]
     notes = []
+    ps = sorted(ps, key=lambda p: (p["pool"].split("-")[0], p["pool"] not in NUDGED, not is_session(p)))
     for p in ps:
         name = short_name(p)[:8]
         if p.get("rolled"):
             lines.append(f"{name:<8}{'':>5}{'reset':>6}")
             continue
         used = f"{p['used']:.0f}%"
+        if is_session(p):
+            lines.append(f"{name:<8}{used:>5}{'':>6}{short_dur(p['left']):>7}")
+            continue
         if p["pool"] not in NUDGED:
             lines.append(f"{name:<8}{used:>5}")
         else:
@@ -436,9 +487,12 @@ def table_lines(ps, extras, now):
             need = p["need"] * 86400
             need = "·" if p["left"] < MIN_LEFT or p["used"] >= 100 else f"{need:.1f}%" if need < 10 else f"{need:.0f}%"
             lines.append(f"{name:<8}{used:>5}{end:>6}{short_dur(p['left']):>7}{need:>8}")
+            wpd = need != "·" and windows_per_day(p, ps, rows)
+            if wpd:
+                notes.append(f"{name} need ≈ {wpd[0]:.1f} full 5h windows/day (one ≈ {wpd[1]:.0f}% of the week)")
         if p["full_at"] and p["full_at"] < p["resets_at"]:
             notes.append(f"{name.strip()} hits 100% ~{when(p['full_at'], now)}")
-        if now - p["at"] > 3 * 3600:
+        if now - p["at"] > 3 * 3600 and p["pool"] in NUDGED:
             notes.append(f"{name.strip()} reading is {dur(now - p['at'])} old")
     prev = [f"{short_name(p).strip()} {p['prev']['used']:.0f}%" for p in ps if p.get("prev")]
     if prev:
@@ -456,6 +510,8 @@ def detail_lines(ps, extras, now):
         lines.append(head)
         if p.get("rolled"):
             lines.append("    window has rolled over since this reading; no reading from the new one yet")
+            continue
+        if is_session(p):
             continue
         if p["pace"] is None:
             lines.append(f"    too early for a pace ({dur(p['elapsed'])} into the window)")
@@ -479,16 +535,17 @@ def detail_lines(ps, extras, now):
     return lines
 
 
-def nudge_text(due, all_ps, now):
+def nudge_text(due, all_ps, now, rows=()):
     blocks = []
     for p in due:
+        wpd = windows_per_day(p, all_ps, rows)
         lines = [f"⏳ <b>{short_name(p)}: ~{p['unused']:.0f}% of this week will go unused</b>",
                  f"{p['used']:.0f}% used · ~{100 - p['unused']:.0f}% at reset · {dur(p['left'])} left",
-                 f"Need <b>{per_day(p['need'])}</b> to use it all"]
+                 f"Need <b>{per_day(p['need'])}</b> to use it all" + (f" (≈ {wpd[0]:.1f} full 5h windows)" if wpd else "")]
         extra = [f"Last week {p['prev']['used']:.0f}%"] if p.get("prev") else []
         if p["pool"] == "claude":
             extra += [f"{short_name(s).strip()} {s['used']:.0f}%" for s in all_ps
-                      if s["pool"].startswith("claude-") and not s.get("rolled") and same_window(s, p)]
+                      if s["pool"].startswith("claude-") and not is_session(s) and not s.get("rolled") and same_window(s, p)]
         if extra:
             lines.append(" · ".join(extra))
         if now - p["at"] > 3 * 3600:
@@ -564,7 +621,7 @@ def cmd_status(send, verbose):
         print("no readings")
         return
     title = f"Weekly limits · {dt.datetime.fromtimestamp(now):%a %H:%M}"
-    table = "\n".join(table_lines(ps, extras, now))
+    table = "\n".join(table_lines(ps, extras, now, rows))
     print(title + "\n\n" + table)
     if verbose:
         print("\n" + "\n".join(detail_lines(ps, extras, now)))
@@ -587,7 +644,7 @@ def cmd_tick(dry_run):
     due = due_nudges(ps, fired, now)
     if not due:
         return
-    text = nudge_text([p for p, _, _ in due], ps, now)
+    text = nudge_text([p for p, _, _ in due], ps, now, rows)
     if dry_run:
         print(text)
         return

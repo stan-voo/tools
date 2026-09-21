@@ -1,5 +1,9 @@
 # quota-watch
 
+- **Two tools:** Claude Code and Codex.
+- **Local, macOS only:** one Python script and a LaunchAgent on your Mac. No server or account of its own.
+- **No credentials:** it never reads, copies or stores your Claude or Codex credentials, and writes no credential anywhere. It asks each tool through that tool's own command (`claude /usage`, `codex app-server`), which uses the login it already has. It parses Claude Code's `~/.claude.json` for a single key, `cachedUsageUtilization` (percentages and reset times), and keeps nothing else from it. The only secret it handles is the Telegram bot token you give it, to send the messages.
+
 **A weekly allowance that resets at 77% is 23% of a subscription thrown away.** The limit resets whether you used it or not.
 
 I measured this before building anything. My Codex week ending 19 September 2026 closed at 77%. My Claude Code week ending 21 September closed at 85%. From the inside, neither felt like under-use. A heavy week feels heavy.
@@ -12,7 +16,7 @@ quota-watch reads both weekly limits every hour. It projects where each week wil
 
 Every hour it:
 
-1. **Reads the weekly limits.** For Claude Code it runs Claude Code's own `/usage` in print mode. That refreshes the usage cache Claude Code keeps in `~/.claude.json`, and quota-watch reads the all-models weekly limit from it, plus any model-scoped one (Fable). For Codex it asks the Codex app-server (`account/rateLimits/read`).
+1. **Reads the weekly limits.** For Claude Code it runs Claude Code's own `/usage` in print mode. That refreshes the usage cache Claude Code keeps in `~/.claude.json`, and quota-watch reads the all-models weekly limit from it, plus any model-scoped one (Fable) and the 5-hour window. For Codex it asks the Codex app-server (`account/rateLimits/read`).
 2. **Records each reading** in `~/.local/state/quota-watch/history.jsonl`.
 3. **Projects the close of each week** with two paces: the average since the window opened, and the last 24 hours from history. It judges on the busier of the two, so a nudge means even your heavier recent habit leaves quota on the table.
 4. **Sends a nudge** if a checkpoint is due.
@@ -36,21 +40,24 @@ Last week 77%
 
 The line I plan against is "Need 45.8%/day". It turns "there's some spare quota" into a daily rate, which is what a schedule is made of.
 
-`status --telegram` sends the whole picture on demand, one row per limit. This one is real, from half an hour after my Claude week reset:
+`status --telegram` sends the whole picture on demand, one row per limit. This one is real, from an hour after my Claude week reset:
 
 ```
-Weekly limits · Mon 16:35
+Weekly limits · Mon 17:15
 
          used   end   left  need/d
-Claude     3%   new  6d23h     14%
+Claude     4%   new  6d22h     14%
+ 5h        2%        4h44m
  Fable     5%
-Codex      7%  ~24%  4d23h     19%
+Codex      8%  ~27%  4d23h     19%
 
 last week: Claude 85% · Fable 64% · Codex 77%
 Codex full reset credit until 05 Oct
 ```
 
 `end` is the projected close, `new` means the week is too young for a pace, and `need/d` is the daily rate that would use the rest.
+
+The 5-hour window sits under its tool and never triggers a nudge. It caps how fast you can spend the week, and wastes nothing on its own. Its job is sizing. Once history holds a full window's worth of 5-hour movement, quota-watch measures how much of the week one full 5-hour window is worth, and restates `need/d` in windows: "need ≈ 1.9 full 5h windows/day". That's a unit you can put in a calendar. My Codex plan (prolite) currently reports no 5-hour window. If yours has one, it shows up the same way.
 
 ## Why this and not codenotch
 
@@ -65,11 +72,12 @@ quota-watch differs in four ways. I suspect they matter only for this one job:
 - **It reaches your phone.** A macOS notification disappears if you are away from the Mac. A Telegram message waits for you.
 - **It reads Codex without touching its token.** codenotch reads each Codex profile's `auth.json`. quota-watch asks the Codex app-server, which answers on Codex's own login.
 
-codenotch is plainly better at everything else: a glanceable view, many providers, several accounts, the five-hour session window, a signed app. For watching your limits, I'd pick codenotch. For weeks that keep ending with quota left over, quota-watch does a job codenotch doesn't attempt. Nothing stops you running both.
+codenotch is plainly better at everything else: a glanceable view, many providers, several accounts, live 5-hour-window alerts, a signed app. For watching your limits, I'd pick codenotch. For weeks that keep ending with quota left over, quota-watch does a job codenotch doesn't attempt. Nothing stops you running both.
 
 ## Limits
 
-- **Two tools, weekly limits only.** Claude Code and Codex. The five-hour session window is ignored: it resets too often to waste much.
+- **Two tools, and only the weekly limit nudges.** Claude Code and Codex. The 5-hour window is shown and used for sizing, never nudged on.
+- **The windows-per-day figure needs data.** It stays hidden until history holds at least one full window's worth of 5-hour movement, and it assumes the week-to-window ratio holds steady. Both limits report whole percents, so treat it as approximate.
 - **macOS.** Scheduling is a LaunchAgent, and the fallback is a macOS notification. The script is plain Python 3.9+ with no dependencies, so it should run from cron on Linux, but I have not tried it.
 - **It leans on undocumented internals.** Claude Code's `cachedUsageUtilization`, and a Codex app-server method that Codex marks experimental. Either can change in any release. `status` flags any reading older than 3 hours, and `status -v` names where each one came from, so a stale number shows up as stale.
 - **The projection is linear.** It assumes the rest of the week looks like the week so far, or like the last day. A holiday or a launch week breaks that. The 15-point margin absorbs small misses, not large ones.
@@ -127,6 +135,10 @@ All optional, in the environment or in `~/.config/quota-watch/env`:
 
 ## Українською
 
+- **Два інструменти:** Claude Code і Codex.
+- **Локально, лише macOS:** один Python-скрипт і LaunchAgent на вашому Маку. Жодного власного сервера чи акаунта.
+- **Жодних облікових даних:** він не читає, не копіює і не зберігає облікових даних Claude чи Codex і ніде їх не записує. Кожен інструмент він питає через його власну команду (`claude /usage`, `codex app-server`), яка працює на вже наявному логіні. Із файлу Claude Code `~/.claude.json` він бере один ключ, `cachedUsageUtilization` (відсотки й час скидання), і нічого іншого звідти не зберігає. Він торкається лише одного секрету: токена Телеграм-бота, який ви самі даєте йому для надсилання повідомлень.
+
 **Якщо тижневий ліміт скинувся на 77%, то 23% підписки пішли на смітник.** Ліміт скидається незалежно від того, використали ви його чи ні.
 
 Перш ніж щось будувати, я це виміряв. Мій тиждень у Codex закрився 19 вересня 2026 року на 77%. Тиждень у Claude Code закрився 21 вересня на 85%. Зсередини жоден не здавався недовикористаним. Важкий тиждень і відчувається важким.
@@ -137,7 +149,7 @@ quota-watch щогодини читає обидва тижневі ліміти
 
 Щогодини він:
 
-1. **Читає тижневі ліміти.** Для Claude Code запускає його ж команду `/usage` у print-режимі. Вона оновлює кеш використання, який Claude Code тримає в `~/.claude.json`, і quota-watch бере звідти загальний тижневий ліміт на всі моделі, а також окремий ліміт на модель (Fable), якщо він є. Для Codex питає Codex app-server (`account/rateLimits/read`).
+1. **Читає тижневі ліміти.** Для Claude Code запускає його ж команду `/usage` у print-режимі. Вона оновлює кеш використання, який Claude Code тримає в `~/.claude.json`, і quota-watch бере звідти загальний тижневий ліміт на всі моделі, а також окремий ліміт на модель (Fable), якщо він є, і п'ятигодинне вікно. Для Codex питає Codex app-server (`account/rateLimits/read`).
 2. **Записує кожне показання** в `~/.local/state/quota-watch/history.jsonl`.
 3. **Прогнозує, як закриється тиждень,** за двома темпами: середнім від початку вікна і за останні 24 години з історії. Орієнтується на вищий із двох. Тож нагадування означає, що навіть ваш інтенсивніший останній темп лишає квоту невикористаною.
 4. **Надсилає нагадування,** якщо настала контрольна точка.
@@ -161,21 +173,24 @@ Last week 77%
 
 Я планую за рядком «Need 45.8%/day». Він перетворює «ніби лишилась якась квота» на денну норму, а з норм і складається розклад.
 
-`status --telegram` надсилає всю картину на вимогу, по рядку на ліміт. Цей справжній, знятий через пів години після того, як скинувся мій тиждень у Claude:
+`status --telegram` надсилає всю картину на вимогу, по рядку на ліміт. Цей справжній, знятий через годину після того, як скинувся мій тиждень у Claude:
 
 ```
-Weekly limits · Mon 16:35
+Weekly limits · Mon 17:15
 
          used   end   left  need/d
-Claude     3%   new  6d23h     14%
+Claude     4%   new  6d22h     14%
+ 5h        2%        4h44m
  Fable     5%
-Codex      7%  ~24%  4d23h     19%
+Codex      8%  ~27%  4d23h     19%
 
 last week: Claude 85% · Fable 64% · Codex 77%
 Codex full reset credit until 05 Oct
 ```
 
 `end` показує прогноз закриття тижня, `new` означає, що тиждень ще надто молодий для темпу, а `need/d` показує денну норму, яка використає решту.
+
+П'ятигодинне вікно стоїть під своїм інструментом і ніколи не запускає нагадування. Воно обмежує, як швидко можна витрачати тиждень, а само по собі нічого не спалює. Його робота в тому, щоб перевести норму в зрозумілі одиниці. Щойно в історії набереться рух на ціле п'ятигодинне вікно, quota-watch виміряє, скільки тижня коштує одне повне вікно, і перепише `need/d` у вікнах: «need ≈ 1.9 full 5h windows/day». Таку одиницю вже можна поставити в календар. Мій план Codex (prolite) зараз п'ятигодинного вікна не має. Якщо ваш має, воно з'явиться так само.
 
 ## Чому це, а не codenotch
 
@@ -190,11 +205,12 @@ quota-watch відрізняється чотирма речами. Підозр
 - **Доходить до телефона.** Сповіщення macOS зникає, якщо ви не біля Мака. Повідомлення в Телеграмі дочекається.
 - **Читає Codex, не чіпаючи його токена.** codenotch читає `auth.json` кожного профілю Codex. quota-watch питає Codex app-server, який відповідає через власний логін Codex.
 
-У всьому іншому codenotch явно кращий: усе видно з першого погляду, багато провайдерів, кілька акаунтів, п'ятигодинне вікно сесії, підписаний застосунок. Щоб стежити за лімітами, я б обрав codenotch. Якщо ж тижні раз у раз закінчуються з невикористаною квотою, quota-watch робить те, за що codenotch не береться. Ніщо не заважає запускати обидва.
+У всьому іншому codenotch явно кращий: усе видно з першого погляду, багато провайдерів, кілька акаунтів, живі сповіщення про п'ятигодинне вікно, підписаний застосунок. Щоб стежити за лімітами, я б обрав codenotch. Якщо ж тижні раз у раз закінчуються з невикористаною квотою, quota-watch робить те, за що codenotch не береться. Ніщо не заважає запускати обидва.
 
 ## Обмеження
 
-- **Два інструменти, лише тижневі ліміти.** Claude Code і Codex. П'ятигодинне вікно сесії він ігнорує: воно скидається надто часто, щоб багато згоріло.
+- **Два інструменти, і нагадує лише тижневий ліміт.** Claude Code і Codex. П'ятигодинне вікно він показує і використовує для розрахунку, але нагадувань за ним не надсилає.
+- **Кількості вікон на день потрібні дані.** Цей рядок не з'явиться, доки в історії не набереться рух хоча б на одне повне п'ятигодинне вікно. До того ж він припускає, що співвідношення тижня й вікна стабільне. Обидва ліміти звітують цілими відсотками, тож цифра приблизна.
 - **macOS.** Розклад тримається на LaunchAgent, а коли Телеграм недоступний, приходить сповіщення macOS. Сам скрипт написаний на чистому Python 3.9+ без залежностей, тож на Linux мав би працювати з cron, але я не перевіряв.
 - **Спирається на незадокументовані механізми.** Це `cachedUsageUtilization` у Claude Code і метод Codex app-server, який сам Codex позначає як експериментальний. Будь-який реліз може їх змінити. `status` позначає показання, старші за 3 години, а `status -v` показує, звідки взялося кожне, тож застаріле число видно як застаріле.
 - **Прогноз лінійний.** Він припускає, що решта тижня буде схожа на тиждень досі або на останню добу. Відпустка чи тиждень запуску це ламають. Запас у 15 пунктів поглинає дрібні промахи, а великі ні.

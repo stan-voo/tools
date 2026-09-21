@@ -6,7 +6,7 @@ Skills and small tools I build for working with coding agents, published when th
 
 | Tool | What it does |
 |---|---|
-| [quota-watch](quota-watch/) | Reads the weekly Claude Code and Codex limits every hour, and sends a Telegram nudge while a week is on track to expire unused. |
+| [quota-watch](quota-watch/) | Reads the weekly Claude Code and Codex limits every hour, and sends a Telegram nudge while a week is on track to expire unused. Local, macOS only, and never reads your Claude or Codex credentials. |
 
 ## Skills
 
@@ -24,6 +24,6 @@ MIT
 
 | Інструмент | Що робить |
 |---|---|
-| [quota-watch](quota-watch/) | Щогодини читає тижневі ліміти Claude Code і Codex та пише в Телеграм, поки частина тижня ще може згоріти невикористаною. |
+| [quota-watch](quota-watch/) | Щогодини читає тижневі ліміти Claude Code і Codex та пише в Телеграм, поки частина тижня ще може згоріти невикористаною. Працює локально, лише на macOS, і не читає облікових даних Claude чи Codex. |
 
 Скілів поки немає. Кожен отримає власну папку з `SKILL.md`, і його можна буде встановити командою `npx skills add stan-voo/tools@<name>`.
