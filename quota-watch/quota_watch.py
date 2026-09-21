@@ -26,6 +26,9 @@ Configuration, all optional, from the environment or from the env file
   QUOTA_WATCH_GAP           points on track to expire before a nudge (15)
   QUOTA_WATCH_CHECKPOINTS   hours before reset, comma-separated (96,48,24,10)
   QUOTA_WATCH_QUIET         local hours when Telegram is silent (23-8)
+  QUOTA_WATCH_WINDOW_NUDGES 0 turns off the 5h window nudge (1)
+  QUOTA_WATCH_WINDOW_LEAD   minutes before a 5h reset when it may fire (90)
+  QUOTA_WATCH_WINDOW_ROOM   % of the window that must be unused (50)
   CLAUDE_BIN, CODEX_BIN     binaries, when they are not where they install
 """
 from __future__ import annotations
@@ -99,6 +102,11 @@ CHECKPOINTS_H = tuple(int(h) for h in CONFIG.get("QUOTA_WATCH_CHECKPOINTS", "96,
 MIN_LEFT = 3 * 3600          # inside this, nothing heavy can still be scheduled: stay quiet
 # Local hours when Telegram still delivers, but silently.
 QUIET = tuple(int(h) for h in CONFIG.get("QUOTA_WATCH_QUIET", "23-8").split("-"))
+# The window nudge: a 5h window about to reset with most of it unused, while
+# the week is behind. Its leftover is capacity that is gone at reset.
+WINDOW_NUDGES = CONFIG.get("QUOTA_WATCH_WINDOW_NUDGES", "1") != "0"
+WINDOW_LEAD = int(CONFIG.get("QUOTA_WATCH_WINDOW_LEAD", 90)) * 60   # minutes before its reset
+WINDOW_ROOM = float(CONFIG.get("QUOTA_WATCH_WINDOW_ROOM", 50))      # % of the window unused
 
 # Pools that get nudged. Model-scoped Claude pools (Fable) sit inside the
 # all-models one, so their headroom is only spendable if that one has room too.
@@ -570,6 +578,41 @@ def due_nudges(ps, fired, now):
     return due
 
 
+def due_window_nudges(ps, fired, now, quiet):
+    """5h windows worth starting something in: resetting within WINDOW_LEAD,
+    at least WINDOW_ROOM of them unused, and the week they belong to behind by
+    the same GAP the weekly nudge uses. Never overnight: nobody acts on it
+    asleep, and hourly ticks would otherwise send one per window all night."""
+    if not WINDOW_NUDGES or quiet:
+        return []
+    due = []
+    for s in ps:
+        if not is_session(s) or s.get("rolled"):
+            continue
+        week = next((p for p in ps if p["pool"] in NUDGED and s["pool"].startswith(p["pool"] + "-")), None)
+        if week is None or week.get("rolled") or week["unused"] is None or week["unused"] < GAP:
+            continue
+        if not 5 * 60 <= s["left"] <= WINDOW_LEAD or 100 - s["used"] < WINDOW_ROOM:
+            continue
+        key = f"{s['pool']}@{round(s['resets_at'] / 3600)}"
+        if not fired.get(key):
+            due.append((s, week, key))
+    return due
+
+
+def window_text(due, all_ps, now, rows=()):
+    blocks = []
+    for s, week, _ in due:
+        room = 100 - s["used"]
+        wpd = windows_per_day(week, all_ps, rows)
+        worth = f" (≈ {room * wpd[1] / 100:.0f}% of the week)" if wpd else ""
+        blocks.append("\n".join([
+            f"⏱ <b>{short_name(week)} 5h window: {room:.0f}% unused{worth}</b>",
+            f"Resets {when(s['resets_at'], now)}, in {dur(s['left'])}",
+            f"The week is on track to leave ~{week['unused']:.0f}% unused. A good moment to start something heavy."]))
+    return "\n\n".join(blocks)
+
+
 def telegram(text, silent):
     token = CONFIG.get("QUOTA_WATCH_TELEGRAM_BOT_TOKEN")
     chat = CONFIG.get("QUOTA_WATCH_TELEGRAM_CHAT_ID")
@@ -641,22 +684,27 @@ def cmd_tick(dry_run):
                         for p in ps)
     log(f"tick: {summary or 'no readings'} ({n} new)")
     fired = load_json(FIRED, retries=0) or {}
+    hour = dt.datetime.now().hour
+    quiet = hour >= QUIET[0] or hour < QUIET[1]
     due = due_nudges(ps, fired, now)
-    if not due:
+    wdue = due_window_nudges(ps, fired, now, quiet)
+    if not due and not wdue:
         return
-    text = nudge_text([p for p, _, _ in due], ps, now, rows)
+    text = "\n\n".join(t for t in (nudge_text([p for p, _, _ in due], ps, now, rows) if due else "",
+                                    window_text(wdue, ps, now, rows) if wdue else "") if t)
     if dry_run:
         print(text)
         return
-    hour = dt.datetime.now().hour
-    silent = hour >= QUIET[0] or hour < QUIET[1]
-    err = telegram(text, silent)
+    err = telegram(text, quiet)
     if err:
         log(f"telegram failed ({err}); macOS notification instead")
         mac_notify(text)
     for p, key, crossed in due:
         fired[key] = sorted(set(fired.get(key, [])) | set(crossed), reverse=True)
         log(f"nudged {p['pool']}: ~{p['unused']:.0f}% on track to expire, {dur(p['left'])} left")
+    for s, _, key in wdue:
+        fired[key] = ["window"]
+        log(f"nudged {s['pool']}: {100 - s['used']:.0f}% of the window unused, resets in {dur(s['left'])}")
     # Forget windows that have closed.
     fired = {k: v for k, v in fired.items() if int(k.split("@")[1]) * 3600 > now - 86400}
     os.makedirs(STATE, exist_ok=True)
