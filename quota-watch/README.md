@@ -6,7 +6,7 @@
 
 **A weekly allowance that resets at 77% is 23% of a subscription thrown away.** The limit resets whether you used it or not.
 
-I measured this before building anything. My Codex week ending 19 September 2026 closed at 77%. My Claude Code week ending 21 September closed at 85%. From the inside, neither felt like under-use. A heavy week feels heavy.
+I measured this before building anything. My Codex week ending 19 September 2026 closed at 77%. My Claude Code week ending 21 September closed at 85%.
 
 quota-watch reads both weekly limits every hour. It projects where each week will close at the pace so far, and sends a Telegram message while there are still days left to spend the difference.
 
@@ -170,7 +170,7 @@ All optional, in the environment or in `~/.config/quota-watch/env`:
 
 **Якщо тижневий ліміт скинувся на 77%, то 23% підписки пішли на смітник.** Ліміт скидається незалежно від того, використали ви його чи ні.
 
-Перш ніж щось будувати, я це виміряв. Мій тиждень у Codex закрився 19 вересня 2026 року на 77%. Тиждень у Claude Code закрився 21 вересня на 85%. Зсередини жоден не здавався недовикористаним. Важкий тиждень і відчувається важким.
+Перш ніж щось будувати, я це виміряв. Мій тиждень у Codex закрився 19 вересня 2026 року на 77%. Тиждень у Claude Code закрився 21 вересня на 85%.
 
 quota-watch щогодини читає обидва тижневі ліміти. Рахує, де закриється кожен тиждень, якщо темп збережеться, і пише в Телеграм, поки ще лишаються дні, щоб витратити різницю.
 
