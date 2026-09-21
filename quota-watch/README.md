@@ -25,7 +25,7 @@ Neither read spends quota. The `/usage` run reports `num_turns 0`, zero tokens a
 
 ## How it notifies you
 
-Two kinds of Telegram message from your own bot: the weekly nudge, and a smaller 5-hour window nudge described further down. The weekly one goes out at 96, 48, 24 and 10 hours before a reset, each checkpoint at most once a week, and only when at least 15 points are on track to expire. Between 23:00 and 08:00 the message arrives silently. If Telegram is not configured, or the send fails, you get a macOS notification instead.
+Three kinds of Telegram message from your own bot: the weekly nudge, a warning when a limit is about to run out early, and a smaller 5-hour window nudge. The last two are described further down. The weekly one goes out at 96, 48, 24 and 10 hours before a reset, each checkpoint at most once a week, and only when at least 15 points are on track to expire. Between 23:00 and 08:00 the message arrives silently. If Telegram is not configured, or the send fails, you get a macOS notification instead.
 
 It stays quiet in the first 12 hours of a week, when a pace is one session's noise, and in the last 3 hours, when nothing heavy can still be scheduled. A busy week sends nothing at all.
 
@@ -58,6 +58,18 @@ To use it all: 13.8%/day, 1.1× last week's 12%/day (it ended at 85%)
 
 The verdict after each name is one of: **behind** (15 points or more on track to go unused), **close** (5 to 15), **on track**, **ahead** (it will run out before the reset, and the message gives the daily rate that would last), or **too early** (under 12 hours into the week, so the comparison is with last week's pace). `status -v` adds a one-row-per-limit table and the working behind every number.
 
+**Which Claude limit leads.** By default, Claude's messages follow the all-models limit. Some people run out of one model first; for me that's Fable. `QUOTA_WATCH_CLAUDE_LIMIT=fable` makes the Fable limit lead Claude's block and every Claude nudge, and moves all models to the sub-line.
+
+**Running out early.** The leading limit gets one more message: a warning when it is on course to run out at least 6 hours before its reset. It comes once when first seen and once more within a day of running out. It gives the daily rate that would last, and says whether other models still have room (made-up numbers):
+
+```
+⚠️ Claude Fable will run out 2d 17h before its reset
+70% used · pace 23.3%/day → runs out ~Wed 23 Sep 01:35
+To last until reset: ≤ 7.5%/day, 0.3× your pace
+All models is at 40%: move work to other models
+5h window 20%, resets 19:54
+```
+
 The 5-hour window sits under its tool. It caps how fast you can spend the week, so its first job is sizing. Once history holds a full window's worth of 5-hour movement, quota-watch measures how much of the week one full 5-hour window is worth, and states the gap in windows: "≈ 1.9 full 5h windows a day". That line appears when there is no heavy hour to compare with. My Codex plan (prolite) currently reports no 5-hour window. If yours has one, it shows up the same way.
 
 Its second job is a smaller nudge. A window's unused part is gone when it resets, and while the week is behind, that is capacity you can't get back. So when a 5-hour window resets within 90 minutes with at least half of it unused, and the week is behind by the same 15-point test, you get:
@@ -78,7 +90,7 @@ Those alerts protect you from running out. My problem ran the other way: both we
 
 quota-watch differs in four ways. I suspect they matter only for this one job:
 
-- **It nudges on under-use,** projected to the reset, where codenotch warns on over-use.
+- **It looks ahead.** It projects each week to its reset, nudges on under-use, and warns when the leading limit will run out early. codenotch alerts on the level itself, at 80% and 100%.
 - **It keeps a history,** so it knows the last day's pace and how last week closed. codenotch remembers only the last reading, to survive a restart.
 - **It reaches your phone.** A macOS notification disappears if you are away from the Mac. A Telegram message waits for you.
 - **It reads Codex without touching its token.** codenotch reads each Codex profile's `auth.json`. quota-watch asks the Codex app-server, which answers on Codex's own login.
@@ -138,6 +150,7 @@ All optional, in the environment or in `~/.config/quota-watch/env`:
 
 | Setting | Default | Meaning |
 |---|---|---|
+| `QUOTA_WATCH_CLAUDE_LIMIT` | `all` | The Claude limit that leads messages and nudges: `all`, or a model such as `fable` |
 | `QUOTA_WATCH_GAP` | `15` | Points on track to expire before a nudge |
 | `QUOTA_WATCH_CHECKPOINTS` | `96,48,24,10` | Hours before a reset when a nudge may fire |
 | `QUOTA_WATCH_QUIET` | `23-8` | Local hours when Telegram delivers silently, and window nudges are skipped |
@@ -174,7 +187,7 @@ quota-watch щогодини читає обидва тижневі ліміти
 
 ## Як він вас сповістить
 
-Двома видами повідомлень у Телеграмі від вашого власного бота: тижневим нагадуванням і меншим нагадуванням про п'ятигодинне вікно, описаним нижче. Тижневе приходить за 96, 48, 24 і 10 годин до скидання ліміту. Кожна точка спрацьовує не частіше разу на тиждень, і лише тоді, коли за прогнозом згорить щонайменше 15 пунктів. З 23:00 до 08:00 повідомлення приходить беззвучно. Якщо Телеграм не налаштований або надіслати не вдалося, замість нього з'явиться сповіщення macOS.
+Трьома видами повідомлень у Телеграмі від вашого власного бота: тижневим нагадуванням, попередженням, що квота закінчиться раніше, і меншим нагадуванням про п'ятигодинне вікно. Останні два описані нижче. Тижневе приходить за 96, 48, 24 і 10 годин до скидання ліміту. Кожна точка спрацьовує не частіше разу на тиждень, і лише тоді, коли за прогнозом згорить щонайменше 15 пунктів. З 23:00 до 08:00 повідомлення приходить беззвучно. Якщо Телеграм не налаштований або надіслати не вдалося, замість нього з'явиться сповіщення macOS.
 
 Перші 12 годин тижня він мовчить, бо за такий час темп відбиває хіба одну сесію. Останні 3 години теж мовчить, бо щось важке ви вже не встигнете запланувати. За інтенсивного тижня повідомлень не буде взагалі.
 
@@ -207,6 +220,18 @@ To use it all: 13.8%/day, 1.1× last week's 12%/day (it ended at 85%)
 
 Після назви стоїть вердикт: **behind** (за прогнозом згорить 15 пунктів і більше), **close** (від 5 до 15), **on track** (іде за планом), **ahead** (квота закінчиться до скидання, і повідомлення підкаже денну норму, якої вистачить) або **too early** (минуло менше 12 годин тижня, тож порівняння йде з темпом минулого тижня). `status -v` додає таблицю по рядку на ліміт і розрахунок за кожним числом.
 
+**Який ліміт Claude головний.** Типово повідомлення про Claude стежать за лімітом на всі моделі. Дехто спершу вичерпує ліміт окремої моделі, у мене це Fable. `QUOTA_WATCH_CLAUDE_LIMIT=fable` робить ліміт Fable головним у блоці Claude і в усіх нагадуваннях про Claude, а ліміт на всі моделі переходить у нижній рядок.
+
+**Квота закінчиться раніше.** Головний ліміт отримує ще одне повідомлення: попередження, коли за прогнозом він вичерпається щонайменше за 6 годин до скидання. Воно приходить раз, коли це вперше видно, і ще раз протягом доби до вичерпання. У ньому є денна норма, якої вистачить до скидання, і сказано, чи лишилось місце в інших моделях (цифри вигадані):
+
+```
+⚠️ Claude Fable will run out 2d 17h before its reset
+70% used · pace 23.3%/day → runs out ~Wed 23 Sep 01:35
+To last until reset: ≤ 7.5%/day, 0.3× your pace
+All models is at 40%: move work to other models
+5h window 20%, resets 19:54
+```
+
 П'ятигодинне вікно стоїть під своїм інструментом. Воно обмежує, як швидко можна витрачати тиждень, тож перша його робота в тому, щоб перевести норму в зрозумілі одиниці. Щойно в історії набереться рух на ціле п'ятигодинне вікно, quota-watch виміряє, скільки тижня коштує одне повне вікно, і покаже розрив у вікнах: «≈ 1.9 full 5h windows a day». Цей рядок з'являється, коли немає важкої години для порівняння. Мій план Codex (prolite) зараз п'ятигодинного вікна не має. Якщо ваш має, воно з'явиться так само.
 
 Друга його робота полягає в меншому нагадуванні. Невикористана частина вікна згорає при скиданні, і поки тиждень відстає, цю ємність уже не повернути. Тож коли п'ятигодинне вікно скидається протягом 90 хвилин, щонайменше половина його не використана, а тиждень відстає за тим самим правилом 15 пунктів, приходить таке:
@@ -227,7 +252,7 @@ The week is on track to leave ~77% unused. A good moment to start something heav
 
 quota-watch відрізняється чотирма речами. Підозрюю, що важать вони лише для цієї однієї задачі:
 
-- **Нагадує про недовикористання,** з прогнозом до скидання. codenotch попереджає про перевитрату.
+- **Дивиться вперед.** Прогнозує кожен тиждень до скидання, нагадує про недовикористання і попереджає, що головний ліміт закінчиться раніше. codenotch реагує на сам рівень: 80% і 100%.
 - **Зберігає історію,** тож знає темп за останню добу і те, як закрився минулий тиждень. codenotch пам'ятає лише останнє показання, щоб пережити перезапуск.
 - **Доходить до телефона.** Сповіщення macOS зникає, якщо ви не біля Мака. Повідомлення в Телеграмі дочекається.
 - **Читає Codex, не чіпаючи його токена.** codenotch читає `auth.json` кожного профілю Codex. quota-watch питає Codex app-server, який відповідає через власний логін Codex.
@@ -287,6 +312,7 @@ python3 quota_watch.py backfill             # заповнити історію 
 
 | Налаштування | Типово | Що означає |
 |---|---|---|
+| `QUOTA_WATCH_CLAUDE_LIMIT` | `all` | Який ліміт Claude головний: `all` або модель, наприклад `fable` |
 | `QUOTA_WATCH_GAP` | `15` | Скільки пунктів має згоріти, щоб надіслати нагадування |
 | `QUOTA_WATCH_CHECKPOINTS` | `96,48,24,10` | За скільки годин до скидання може прийти нагадування |
 | `QUOTA_WATCH_QUIET` | `23-8` | Години, коли Телеграм доставляє беззвучно, а нагадувань про вікно немає зовсім |

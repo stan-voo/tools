@@ -26,6 +26,7 @@ Configuration, all optional, from the environment or from the env file
   QUOTA_WATCH_GAP           points on track to expire before a nudge (15)
   QUOTA_WATCH_CHECKPOINTS   hours before reset, comma-separated (96,48,24,10)
   QUOTA_WATCH_QUIET         local hours when Telegram is silent (23-8)
+  QUOTA_WATCH_CLAUDE_LIMIT  the Claude limit that leads: all, or a model such as fable (all)
   QUOTA_WATCH_WINDOW_NUDGES 0 turns off the 5h window nudge (1)
   QUOTA_WATCH_WINDOW_LEAD   minutes before a 5h reset when it may fire (90)
   QUOTA_WATCH_WINDOW_ROOM   % of the window that must be unused (50)
@@ -108,11 +109,15 @@ WINDOW_NUDGES = CONFIG.get("QUOTA_WATCH_WINDOW_NUDGES", "1") != "0"
 WINDOW_LEAD = int(CONFIG.get("QUOTA_WATCH_WINDOW_LEAD", 90)) * 60   # minutes before its reset
 WINDOW_ROOM = float(CONFIG.get("QUOTA_WATCH_WINDOW_ROOM", 50))      # % of the window unused
 
-# Pools that get nudged. Model-scoped Claude pools (Fable) sit inside the
-# all-models one, so their headroom is only spendable if that one has room too.
-# Model-scoped Codex limits (seen: "GPT-5.3-Codex-Spark") are of unknown nesting.
-# Both kinds are reported, never nudged on their own.
-NUDGED = ("claude", "codex")
+# The limit that leads each tool's messages and nudges. Codex: its weekly
+# limit. Claude: the all-models limit by default, or a model-scoped one by name
+# (QUOTA_WATCH_CLAUDE_LIMIT=fable) for someone who runs out of that model first.
+# The rest of a tool's limits are reported under it, never nudged on their own:
+# a model-scoped limit sits inside all-models, and model-scoped Codex limits
+# (seen: "GPT-5.3-Codex-Spark") are of unknown nesting.
+CLAUDE_LIMIT = re.sub(r"[^a-z0-9]+", "-", CONFIG.get("QUOTA_WATCH_CLAUDE_LIMIT", "all").lower()).strip("-")
+PRIMARY = {"claude": "claude" if CLAUDE_LIMIT in ("", "all") else "claude-" + CLAUDE_LIMIT, "codex": "codex"}
+AHEAD_MARGIN = 6 * 3600      # warn of running out only when it would be this long before the reset
 
 
 # ── Readings ────────────────────────────────────────────────────────────────
@@ -375,8 +380,28 @@ def window_ratio(rows, weekly, session):
     return dw / ds * 100 if ds >= 100 and dw > 0 else None
 
 
+def tool_of(p):
+    return p["pool"].split("-")[0]
+
+
+def mark_primaries(ps):
+    """Flag the limit that leads each tool. A configured model-scoped limit
+    that is not in this reading falls back to the tool's own weekly limit."""
+    pools = {p["pool"] for p in ps}
+    for tool, want in PRIMARY.items():
+        lead = want if want in pools else tool
+        for p in ps:
+            if tool_of(p) == tool:
+                p["primary"] = p["pool"] == lead
+    return ps
+
+
+def siblings(p, ps):
+    return [s for s in ps if tool_of(s) == tool_of(p) and s is not p]
+
+
 def session_pool(p, ps):
-    return next((s for s in ps if s["pool"].startswith(p["pool"] + "-") and is_session(s)), None)
+    return next((s for s in siblings(p, ps) if is_session(s)), None)
 
 
 def previous_close(r, rows):
@@ -459,9 +484,12 @@ def short_dur(s):
 
 
 def short_name(p):
-    if p["pool"] in NUDGED:
-        return p["pool"].capitalize()
-    # A model-scoped limit, indented under its tool: " Fable", " Spark".
+    tool = tool_of(p).capitalize()
+    if p.get("primary"):
+        return tool if p["pool"] == tool_of(p) else p["label"]  # "Claude", "Codex", "Claude Fable"
+    if p["pool"] == tool_of(p):
+        return " All models"
+    # A model-scoped limit or a 5h window, indented under its tool: " Fable", " Spark", " 5h".
     sub = p["label"].split(" ", 1)[-1]
     return " " + (sub if len(sub) <= 7 else sub.rsplit("-", 1)[-1][:7])
 
@@ -478,31 +506,32 @@ def table_lines(ps, extras, now, rows=()):
     rate that would use the rest of the week. A 5h window sits under its tool
     with only used and left. Notes only for what is out of the ordinary.
     Narrow enough for a phone screen in Telegram."""
-    lines = [f"{'':<8}{'used':>5}{'end':>6}{'left':>7}{'need/d':>8}"]
+    w = 13
+    lines = [f"{'':<{w}}{'used':>5}{'end':>6}{'left':>7}{'need/d':>8}"]
     notes = []
-    ps = sorted(ps, key=lambda p: (p["pool"].split("-")[0], p["pool"] not in NUDGED, not is_session(p)))
+    ps = sorted(ps, key=lambda p: (tool_of(p), not p.get("primary"), not is_session(p)))
     for p in ps:
-        name = short_name(p)[:8]
+        name = short_name(p)[:w]
         if p.get("rolled"):
-            lines.append(f"{name:<8}{'':>5}{'reset':>6}")
+            lines.append(f"{name:<{w}}{'':>5}{'reset':>6}")
             continue
         used = f"{p['used']:.0f}%"
         if is_session(p):
-            lines.append(f"{name:<8}{used:>5}{'':>6}{short_dur(p['left']):>7}")
+            lines.append(f"{name:<{w}}{used:>5}{'':>6}{short_dur(p['left']):>7}")
             continue
-        if p["pool"] not in NUDGED:
-            lines.append(f"{name:<8}{used:>5}")
+        if not p.get("primary"):
+            lines.append(f"{name:<{w}}{used:>5}")
         else:
             end = "new" if p["unused"] is None else f"~{100 - p['unused']:.0f}%"
             need = p["need"] * 86400
             need = "·" if p["left"] < MIN_LEFT or p["used"] >= 100 else f"{need:.1f}%" if need < 10 else f"{need:.0f}%"
-            lines.append(f"{name:<8}{used:>5}{end:>6}{short_dur(p['left']):>7}{need:>8}")
+            lines.append(f"{name:<{w}}{used:>5}{end:>6}{short_dur(p['left']):>7}{need:>8}")
             wpd = need != "·" and windows_per_day(p, ps, rows)
             if wpd:
                 notes.append(f"{name} need ≈ {wpd[0]:.1f} full 5h windows/day (one ≈ {wpd[1]:.0f}% of the week)")
         if p["full_at"] and p["full_at"] < p["resets_at"]:
             notes.append(f"{name.strip()} hits 100% ~{when(p['full_at'], now)}")
-        if now - p["at"] > 3 * 3600 and p["pool"] in NUDGED:
+        if now - p["at"] > 3 * 3600 and p.get("primary"):
             notes.append(f"{name.strip()} reading is {dur(now - p['at'])} old")
     prev = [f"{short_name(p).strip()} {p['prev']['used']:.0f}%" for p in ps if p.get("prev")]
     if prev:
@@ -563,12 +592,20 @@ def tool_block(p, ps, rows, now, header=None):
     r_day = r * 86400 if r is not None else None
     if r_day is None:
         lines.append(f"{p['used']:.0f}% used, {dur(p['elapsed'])} into the week")
+    elif v == "ahead":
+        lines.append(f"{p['used']:.0f}% used · pace {r_day:.1f}%/day → runs out ~{when(p['full_at'], now)}")
     else:
         lines.append(f"{p['used']:.0f}% used · pace {r_day:.1f}%/day → ~{100 - p['unused']:.0f}% at reset")
-    extra = p["unused"]
+    extra, room = p["unused"], None
     if v == "ahead":
-        lines.append(f"At this pace it runs out ~{when(p['full_at'], now)}. "
-                     f"To last until reset: ≤ {need:.1f}%/day")
+        lines.append(f"To last until reset: ≤ {need:.1f}%/day" + (f", {times(need / r_day)} your pace" if r_day else ""))
+        # A model-scoped limit running out while all-models has room: the
+        # work can move to another model instead of stopping.
+        room = next((s for s in siblings(p, ps) if s["pool"] == tool_of(p)), None)
+        if room and not room.get("rolled") and room["used"] < p["used"] - 10:
+            lines.append(f"All models is at {room['used']:.0f}%: move work to other models")
+        else:
+            room = None
     elif v == "on track":
         lines.append("On pace to use it all")
     elif p["left"] >= MIN_LEFT:
@@ -586,7 +623,7 @@ def tool_block(p, ps, rows, now, header=None):
             lines.append(f"≈ {extra / hh[0]:.1f} more hours like {when(hh[1], now)} (+{hh[0]:.0f} in an hour)")
         elif extra and wpd:
             lines.append(f"≈ {wpd[0]:.1f} full 5h windows a day")
-    subs = [s for s in ps if s["pool"].startswith(p["pool"] + "-") and not s.get("rolled")]
+    subs = sorted((s for s in siblings(p, ps) if not s.get("rolled") and s is not room), key=lambda s: not is_session(s))
     if subs:
         lines.append(" · ".join(f"{short_name(s).strip()} {'window ' if is_session(s) else ''}{s['used']:.0f}%"
                                 + (f", resets {when(s['resets_at'], now)}" if is_session(s) else "") for s in subs))
@@ -596,7 +633,7 @@ def tool_block(p, ps, rows, now, header=None):
 
 
 def status_message(ps, extras, rows, now):
-    main = sorted((p for p in ps if p["pool"] in NUDGED), key=lambda p: URGENCY[verdict(p)])
+    main = sorted((p for p in ps if p.get("primary")), key=lambda p: URGENCY[verdict(p)])
     blocks = ["\n".join(tool_block(p, ps, rows, now)) for p in main]
     credits = (extras or {}).get("reset_credits", [])
     if credits and any(verdict(p) == "ahead" or p["used"] >= 90 for p in main if p["pool"] == "codex"):
@@ -654,7 +691,7 @@ def nudge_text(due, all_ps, now, rows=()):
 def due_nudges(ps, fired, now):
     due = []
     for p in ps:
-        if p["pool"] not in NUDGED:
+        if not p.get("primary"):
             continue
         if p.get("rolled") or p["unused"] is None or p["unused"] < GAP or p["left"] < MIN_LEFT:
             continue
@@ -663,6 +700,29 @@ def due_nudges(ps, fired, now):
         if crossed and not set(crossed) <= set(fired.get(key, [])):
             due.append((p, key, crossed))
     return due
+
+
+def due_ahead_nudges(ps, fired, now):
+    """A leading limit on course to run out at least AHEAD_MARGIN before its
+    reset. Twice per window at most: when first seen, and again within a day
+    of running out. Shares the weekly key, so the tags sit beside the
+    checkpoints already sent."""
+    due = []
+    for p in ps:
+        if not p.get("primary") or verdict(p) != "ahead" or p["resets_at"] - p["full_at"] < AHEAD_MARGIN:
+            continue
+        key = f"{p['pool']}@{round(p['resets_at'] / 3600)}"
+        tags = ["ahead"] + (["ahead-24h"] if p["full_at"] - now <= 86400 else [])
+        if not set(tags) <= set(fired.get(key, [])):
+            due.append((p, key, tags))
+    return due
+
+
+def ahead_text(due, all_ps, now, rows=()):
+    return "\n\n".join("\n".join(tool_block(
+        p, all_ps, rows, now,
+        header=f"⚠️ <b>{short_name(p)} will run out {dur(p['resets_at'] - p['full_at'])} before its reset</b>"))
+        for p, _, _ in due)
 
 
 def due_window_nudges(ps, fired, now, quiet):
@@ -676,7 +736,7 @@ def due_window_nudges(ps, fired, now, quiet):
     for s in ps:
         if not is_session(s) or s.get("rolled"):
             continue
-        week = next((p for p in ps if p["pool"] in NUDGED and s["pool"].startswith(p["pool"] + "-")), None)
+        week = next((p for p in siblings(s, ps) if p.get("primary")), None)
         if week is None or week.get("rolled") or week["unused"] is None or week["unused"] < GAP:
             continue
         if not 5 * 60 <= s["left"] <= WINDOW_LEAD or 100 - s["used"] < WINDOW_ROOM:
@@ -746,7 +806,7 @@ def cmd_status(send, verbose):
     record(readings)
     now = time.time()
     rows = history()
-    ps = [project(r, rows, now) for r in readings]
+    ps = mark_primaries([project(r, rows, now) for r in readings])
     if not ps:
         print("no readings")
         return
@@ -765,7 +825,7 @@ def cmd_tick(dry_run):
     n = record(readings)
     now = time.time()
     rows = history()
-    ps = [project(r, rows, now) for r in readings]
+    ps = mark_primaries([project(r, rows, now) for r in readings])
     summary = ", ".join(f"{p['pool']} {p['used']:.0f}%" + (f"→{100 - p['unused']:.0f}%" if p["unused"] is not None else "")
                         for p in ps)
     log(f"tick: {summary or 'no readings'} ({n} new)")
@@ -773,10 +833,12 @@ def cmd_tick(dry_run):
     hour = dt.datetime.now().hour
     quiet = hour >= QUIET[0] or hour < QUIET[1]
     due = due_nudges(ps, fired, now)
+    adue = due_ahead_nudges(ps, fired, now)
     wdue = due_window_nudges(ps, fired, now, quiet)
-    if not due and not wdue:
+    if not due and not adue and not wdue:
         return
-    text = "\n\n".join(t for t in (nudge_text([p for p, _, _ in due], ps, now, rows) if due else "",
+    text = "\n\n".join(t for t in (ahead_text(adue, ps, now, rows) if adue else "",
+                                    nudge_text([p for p, _, _ in due], ps, now, rows) if due else "",
                                     window_text(wdue, ps, now, rows) if wdue else "") if t)
     if dry_run:
         print(text)
@@ -786,8 +848,11 @@ def cmd_tick(dry_run):
         log(f"telegram failed ({err}); macOS notification instead")
         mac_notify(text)
     for p, key, crossed in due:
-        fired[key] = sorted(set(fired.get(key, [])) | set(crossed), reverse=True)
+        fired[key] = sorted(set(fired.get(key, [])) | set(crossed), key=str)
         log(f"nudged {p['pool']}: ~{p['unused']:.0f}% on track to expire, {dur(p['left'])} left")
+    for p, key, tags in adue:
+        fired[key] = sorted(set(fired.get(key, [])) | set(tags), key=str)
+        log(f"warned {p['pool']}: runs out ~{when(p['full_at'], now)}, {dur(p['resets_at'] - p['full_at'])} before reset")
     for s, _, key in wdue:
         fired[key] = ["window"]
         log(f"nudged {s['pool']}: {100 - s['used']:.0f}% of the window unused, resets in {dur(s['left'])}")
