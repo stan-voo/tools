@@ -29,35 +29,36 @@ Two kinds of Telegram message from your own bot: the weekly nudge, and a smaller
 
 It stays quiet in the first 12 hours of a week, when a pace is one session's noise, and in the last 3 hours, when nothing heavy can still be scheduled. A busy week sends nothing at all.
 
-A nudge, rendered from a simulated Thursday checkpoint:
+A weekly nudge from a simulated 48-hour checkpoint (the numbers are made up; the heavy hour is real history):
 
 ```
-⏳ Codex: ~86% of this week will go unused
-10% used · ~14% at reset · 1d 23h left
-Need 45.8%/day to use it all
-Last week 77%
+⏳ Codex: ~79% of this week will go unused · resets Wed 23 Sep 18:38
+15% used · pace 3.0%/day → ~21% at reset
+To use it all: 42.5%/day, 14.2× your pace
+≈ 2.6 more hours like Fri 18 Sep 23:07 (+30 in an hour)
 ```
 
-The line I plan against is "Need 45.8%/day". It turns "there's some spare quota" into a daily rate, which is what a schedule is made of.
+Each line answers one question. Where does the week stand? What would use all of it, measured against your own pace? And how big is that gap in work you have actually done? The last line comes from history: the biggest one-hour rise of the last two weeks. For me that was a fan-out of about twenty parallel Codex sessions, so "2.6 more hours like it" is something I can put in a calendar. "14.2× your pace" says the same thing more bluntly: a normal week won't close this gap.
 
-`status --telegram` sends the whole picture on demand, one row per limit. This one is real, from an hour after my Claude week reset:
+`status --telegram` sends the same view on demand, tools that need action first. This one is real, from two and a half hours after my Claude week reset:
 
 ```
-Weekly limits · Mon 17:15
+Weekly limits · Mon 18:37
 
-         used   end   left  need/d
-Claude     4%   new  6d22h     14%
- 5h        2%        4h44m
- Fable     5%
-Codex      8%  ~27%  4d23h     19%
+Codex · behind · resets Sat 26 Sep 16:20
+8% used · pace 3.8%/day → ~27% at reset
+To use it all: 18.8%/day, 4.9× your pace
+≈ 2.4 more hours like Fri 18 Sep 23:07 (+30 in an hour)
 
-last week: Claude 85% · Fable 64% · Codex 77%
-Codex full reset credit until 05 Oct
+Claude · too early · resets Mon 28 Sep 16:00
+5% used, 2h 37m into the week
+To use it all: 13.8%/day, 1.1× last week's 12%/day (it ended at 85%)
+5h window 7%, resets 22:00 · Fable 6%
 ```
 
-`end` is the projected close, `new` means the week is too young for a pace, and `need/d` is the daily rate that would use the rest.
+The verdict after each name is one of: **behind** (15 points or more on track to go unused), **close** (5 to 15), **on track**, **ahead** (it will run out before the reset, and the message gives the daily rate that would last), or **too early** (under 12 hours into the week, so the comparison is with last week's pace). `status -v` adds a one-row-per-limit table and the working behind every number.
 
-The 5-hour window sits under its tool. It caps how fast you can spend the week, so its first job is sizing. Once history holds a full window's worth of 5-hour movement, quota-watch measures how much of the week one full 5-hour window is worth, and restates `need/d` in windows: "need ≈ 1.9 full 5h windows/day". That's a unit you can put in a calendar. My Codex plan (prolite) currently reports no 5-hour window. If yours has one, it shows up the same way.
+The 5-hour window sits under its tool. It caps how fast you can spend the week, so its first job is sizing. Once history holds a full window's worth of 5-hour movement, quota-watch measures how much of the week one full 5-hour window is worth, and states the gap in windows: "≈ 1.9 full 5h windows a day". That line appears when there is no heavy hour to compare with. My Codex plan (prolite) currently reports no 5-hour window. If yours has one, it shows up the same way.
 
 Its second job is a smaller nudge. A window's unused part is gone when it resets, and while the week is behind, that is capacity you can't get back. So when a 5-hour window resets within 90 minutes with at least half of it unused, and the week is behind by the same 15-point test, you get:
 
@@ -88,6 +89,7 @@ codenotch is plainly better at everything else: a glanceable view, many provider
 
 - **Two tools.** Claude Code and Codex. A 5-hour window nudges only while its week is behind; on a week that's on pace it stays silent.
 - **Hourly ticks can miss a window.** The window nudge needs a tick inside the 90 minutes before a reset. A Mac asleep through that stretch sends nothing.
+- **"More hours like…" assumes you can repeat that hour.** It is your biggest one-hour rise of the last two weeks, and it only appears if that rise was at least 5 points.
 - **The windows-per-day figure needs data.** It stays hidden until history holds at least one full window's worth of 5-hour movement, and it assumes the week-to-window ratio holds steady. Both limits report whole percents, so treat it as approximate.
 - **macOS.** Scheduling is a LaunchAgent, and the fallback is a macOS notification. The script is plain Python 3.9+ with no dependencies, so it should run from cron on Linux, but I have not tried it.
 - **It leans on undocumented internals.** Claude Code's `cachedUsageUtilization`, and a Codex app-server method that Codex marks experimental. Either can change in any release. `status` flags any reading older than 3 hours, and `status -v` names where each one came from, so a stale number shows up as stale.
@@ -125,8 +127,8 @@ python3 quota_watch.py status --telegram
 ## Commands and settings
 
 ```
-python3 quota_watch.py status               # one row per limit: used, projected close, need/day
-python3 quota_watch.py status -v            # the same, plus the working: both paces, sources
+python3 quota_watch.py status               # where each week stands, and what would use it all
+python3 quota_watch.py status -v            # plus a one-row-per-limit table and the working
 python3 quota_watch.py status --telegram    # the same, sent to Telegram
 python3 quota_watch.py tick --dry-run       # print the nudge a tick would send now
 python3 quota_watch.py backfill             # seed history from Codex's session logs
@@ -176,35 +178,36 @@ quota-watch щогодини читає обидва тижневі ліміти
 
 Перші 12 годин тижня він мовчить, бо за такий час темп відбиває хіба одну сесію. Останні 3 години теж мовчить, бо щось важке ви вже не встигнете запланувати. За інтенсивного тижня повідомлень не буде взагалі.
 
-Ось нагадування із симуляції четвергової точки:
+Тижневе нагадування із симуляції точки за 48 годин до скидання (цифри вигадані, а важка година справжня, з історії):
 
 ```
-⏳ Codex: ~86% of this week will go unused
-10% used · ~14% at reset · 1d 23h left
-Need 45.8%/day to use it all
-Last week 77%
+⏳ Codex: ~79% of this week will go unused · resets Wed 23 Sep 18:38
+15% used · pace 3.0%/day → ~21% at reset
+To use it all: 42.5%/day, 14.2× your pace
+≈ 2.6 more hours like Fri 18 Sep 23:07 (+30 in an hour)
 ```
 
-Я планую за рядком «Need 45.8%/day». Він перетворює «ніби лишилась якась квота» на денну норму, а з норм і складається розклад.
+Кожен рядок відповідає на одне питання. Де зараз тиждень? Скільки треба, щоб використати все, у порівнянні з вашим власним темпом? І наскільки великий цей розрив у роботі, яку ви вже колись робили? Останній рядок береться з історії: найбільший приріст за годину за останні два тижні. У мене це був запуск близько двадцяти паралельних сесій Codex, тож «ще 2.6 години як та» можна просто поставити в календар. «14.2× your pace» каже те саме різкіше: звичайний тиждень цей розрив не закриє.
 
-`status --telegram` надсилає всю картину на вимогу, по рядку на ліміт. Цей справжній, знятий через годину після того, як скинувся мій тиждень у Claude:
+`status --telegram` надсилає цю ж картину на вимогу, спершу інструменти, де треба щось робити. Ця справжня, знята через дві з половиною години після скидання мого тижня в Claude:
 
 ```
-Weekly limits · Mon 17:15
+Weekly limits · Mon 18:37
 
-         used   end   left  need/d
-Claude     4%   new  6d22h     14%
- 5h        2%        4h44m
- Fable     5%
-Codex      8%  ~27%  4d23h     19%
+Codex · behind · resets Sat 26 Sep 16:20
+8% used · pace 3.8%/day → ~27% at reset
+To use it all: 18.8%/day, 4.9× your pace
+≈ 2.4 more hours like Fri 18 Sep 23:07 (+30 in an hour)
 
-last week: Claude 85% · Fable 64% · Codex 77%
-Codex full reset credit until 05 Oct
+Claude · too early · resets Mon 28 Sep 16:00
+5% used, 2h 37m into the week
+To use it all: 13.8%/day, 1.1× last week's 12%/day (it ended at 85%)
+5h window 7%, resets 22:00 · Fable 6%
 ```
 
-`end` показує прогноз закриття тижня, `new` означає, що тиждень ще надто молодий для темпу, а `need/d` показує денну норму, яка використає решту.
+Після назви стоїть вердикт: **behind** (за прогнозом згорить 15 пунктів і більше), **close** (від 5 до 15), **on track** (іде за планом), **ahead** (квота закінчиться до скидання, і повідомлення підкаже денну норму, якої вистачить) або **too early** (минуло менше 12 годин тижня, тож порівняння йде з темпом минулого тижня). `status -v` додає таблицю по рядку на ліміт і розрахунок за кожним числом.
 
-П'ятигодинне вікно стоїть під своїм інструментом. Воно обмежує, як швидко можна витрачати тиждень, тож перша його робота в тому, щоб перевести норму в зрозумілі одиниці. Щойно в історії набереться рух на ціле п'ятигодинне вікно, quota-watch виміряє, скільки тижня коштує одне повне вікно, і перепише `need/d` у вікнах: «need ≈ 1.9 full 5h windows/day». Таку одиницю вже можна поставити в календар. Мій план Codex (prolite) зараз п'ятигодинного вікна не має. Якщо ваш має, воно з'явиться так само.
+П'ятигодинне вікно стоїть під своїм інструментом. Воно обмежує, як швидко можна витрачати тиждень, тож перша його робота в тому, щоб перевести норму в зрозумілі одиниці. Щойно в історії набереться рух на ціле п'ятигодинне вікно, quota-watch виміряє, скільки тижня коштує одне повне вікно, і покаже розрив у вікнах: «≈ 1.9 full 5h windows a day». Цей рядок з'являється, коли немає важкої години для порівняння. Мій план Codex (prolite) зараз п'ятигодинного вікна не має. Якщо ваш має, воно з'явиться так само.
 
 Друга його робота полягає в меншому нагадуванні. Невикористана частина вікна згорає при скиданні, і поки тиждень відстає, цю ємність уже не повернути. Тож коли п'ятигодинне вікно скидається протягом 90 хвилин, щонайменше половина його не використана, а тиждень відстає за тим самим правилом 15 пунктів, приходить таке:
 
@@ -235,6 +238,7 @@ quota-watch відрізняється чотирма речами. Підозр
 
 - **Два інструменти.** Claude Code і Codex. П'ятигодинне вікно нагадує лише тоді, коли його тиждень відстає. Якщо тиждень іде за планом, воно мовчить.
 - **Щогодинні перевірки можуть проґавити вікно.** Нагадуванню про вікно потрібна перевірка в останні 90 хвилин перед скиданням. Якщо Мак у цей час спить, нічого не прийде.
+- **«More hours like…» припускає, що ту годину можна повторити.** Це ваш найбільший приріст за годину за останні два тижні, і рядок з'являється, лише якщо він був щонайменше 5 пунктів.
 - **Кількості вікон на день потрібні дані.** Цей рядок не з'явиться, доки в історії не набереться рух хоча б на одне повне п'ятигодинне вікно. До того ж він припускає, що співвідношення тижня й вікна стабільне. Обидва ліміти звітують цілими відсотками, тож цифра приблизна.
 - **macOS.** Розклад тримається на LaunchAgent, а коли Телеграм недоступний, приходить сповіщення macOS. Сам скрипт написаний на чистому Python 3.9+ без залежностей, тож на Linux мав би працювати з cron, але я не перевіряв.
 - **Спирається на незадокументовані механізми.** Це `cachedUsageUtilization` у Claude Code і метод Codex app-server, який сам Codex позначає як експериментальний. Будь-який реліз може їх змінити. `status` позначає показання, старші за 3 години, а `status -v` показує, звідки взялося кожне, тож застаріле число видно як застаріле.
@@ -272,8 +276,8 @@ python3 quota_watch.py status --telegram
 ## Команди й налаштування
 
 ```
-python3 quota_watch.py status               # по рядку на ліміт: використано, прогноз, норма на день
-python3 quota_watch.py status -v            # те саме, плюс розрахунок: обидва темпи, джерела
+python3 quota_watch.py status               # де кожен тиждень і що використає решту
+python3 quota_watch.py status -v            # плюс таблиця по рядку на ліміт і розрахунок
 python3 quota_watch.py status --telegram    # те саме, в Телеграм
 python3 quota_watch.py tick --dry-run       # показати нагадування, яке надіслав би запуск зараз
 python3 quota_watch.py backfill             # заповнити історію з логів сесій Codex

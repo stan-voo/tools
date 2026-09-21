@@ -270,30 +270,32 @@ def codex_live(timeout=25):
 
 
 def codex_rollout_snapshots(since):
-    """Last rate-limit snapshot of each rollout log modified after `since`."""
+    """First and last rate-limit snapshot of each rollout log modified after
+    `since`. Both ends, so a burst inside one session is visible in history
+    (heaviest_hour needs where it started, not only where it finished)."""
     out = []
     for f in glob.glob(os.path.join(CODEX_SESSIONS, "*/*/*/rollout-*.jsonl")):
         try:
             if os.path.getmtime(f) < since:
                 continue
-            last = None
+            first = last = None
             with open(f) as fh:
                 for line in fh:
                     if '"rate_limits"' in line:
+                        first = first or line
                         last = line
         except OSError:
             continue
-        if not last:
-            continue
-        try:
-            ev = json.loads(last)
-            rl = ev["payload"]["rate_limits"]
-            at = iso(ev["timestamp"])
-        except (ValueError, KeyError, TypeError):
-            continue
-        if rl:
-            out += codex_windows(rl.get("limit_id"), rl.get("limit_name"),
-                                 [rl.get("primary") or {}, rl.get("secondary") or {}], at, "rollout-log")
+        for line in {first, last} - {None}:
+            try:
+                ev = json.loads(line)
+                rl = ev["payload"]["rate_limits"]
+                at = iso(ev["timestamp"])
+            except (ValueError, KeyError, TypeError):
+                continue
+            if rl:
+                out += codex_windows(rl.get("limit_id"), rl.get("limit_name"),
+                                     [rl.get("primary") or {}, rl.get("secondary") or {}], at, "rollout-log")
     return out
 
 
@@ -511,6 +513,103 @@ def table_lines(ps, extras, now, rows=()):
     return lines + ([""] + notes if notes else [])
 
 
+def verdict(p):
+    if p.get("rolled"):
+        return "reset"
+    if p["full_at"] and p["full_at"] < p["resets_at"]:
+        return "ahead"
+    if p["unused"] is None:
+        return "too early"
+    return "behind" if p["unused"] >= GAP else "close" if p["unused"] >= 5 else "on track"
+
+
+URGENCY = {"behind": 0, "ahead": 1, "close": 2, "too early": 3, "on track": 4, "reset": 5}
+
+
+def rate(p):
+    """The busier of the two paces, %/s: the one every projection judges on."""
+    xs = [x for x in (p["pace"], p["pace24"]) if x is not None]
+    return max(xs) if xs else None
+
+
+def heaviest_hour(pool, rows, now, days=14):
+    """(points, start) of the biggest rise within about an hour in the last
+    `days`, same window. A unit Stan remembers doing, so a gap can be stated as
+    "N more hours like that one". None below 5 points: too small to plan with."""
+    pts = sorted((h["at"], h["used"], h["resets_at"]) for h in rows
+                 if h["pool"] == pool and h["at"] > now - days * 86400)
+    best = (0.0, None)
+    for i, (t0, u0, r0) in enumerate(pts):
+        for t1, u1, r1 in pts[i + 1:]:
+            if t1 - t0 > 75 * 60:
+                break
+            if abs(r1 - r0) < 3600 and u1 - u0 > best[0]:
+                best = (u1 - u0, t0)
+    return best if best[0] >= 5 else None
+
+
+def times(m):
+    return "about the same" if 0.9 <= m <= 1.1 else f"{m:.1f}×"
+
+
+def tool_block(p, ps, rows, now, header=None):
+    """What a tool's week means, in four short lines: where it stands, what
+    would use it all against your pace, and that gap in units you can plan with."""
+    name, v = short_name(p), verdict(p)
+    if v == "reset":
+        return [f"<b>{name}</b> · reset, no reading from the new week yet"]
+    lines = [header or f"<b>{name} · {v}</b> · resets {when(p['resets_at'], now)}"]
+    need, r = p["need"] * 86400, rate(p)
+    r_day = r * 86400 if r is not None else None
+    if r_day is None:
+        lines.append(f"{p['used']:.0f}% used, {dur(p['elapsed'])} into the week")
+    else:
+        lines.append(f"{p['used']:.0f}% used · pace {r_day:.1f}%/day → ~{100 - p['unused']:.0f}% at reset")
+    extra = p["unused"]
+    if v == "ahead":
+        lines.append(f"At this pace it runs out ~{when(p['full_at'], now)}. "
+                     f"To last until reset: ≤ {need:.1f}%/day")
+    elif v == "on track":
+        lines.append("On pace to use it all")
+    elif p["left"] >= MIN_LEFT:
+        if r_day:
+            base = f"{times(need / r_day)} your pace"
+        elif p.get("prev"):
+            last_day = p["prev"]["used"] / 7
+            base = f"{times(need / last_day)} last week's {last_day:.0f}%/day (it ended at {p['prev']['used']:.0f}%)"
+            extra = max(0.0, 100 - p["used"] - last_day * p["left"] / 86400)
+        else:
+            base = None
+        lines.append(f"To use it all: {need:.1f}%/day" + (f", {base}" if base else ""))
+        hh, wpd = heaviest_hour(p["pool"], rows, now), windows_per_day(p, ps, rows)
+        if extra and hh:
+            lines.append(f"≈ {extra / hh[0]:.1f} more hours like {when(hh[1], now)} (+{hh[0]:.0f} in an hour)")
+        elif extra and wpd:
+            lines.append(f"≈ {wpd[0]:.1f} full 5h windows a day")
+    subs = [s for s in ps if s["pool"].startswith(p["pool"] + "-") and not s.get("rolled")]
+    if subs:
+        lines.append(" · ".join(f"{short_name(s).strip()} {'window ' if is_session(s) else ''}{s['used']:.0f}%"
+                                + (f", resets {when(s['resets_at'], now)}" if is_session(s) else "") for s in subs))
+    if now - p["at"] > 3 * 3600:
+        lines.append(f"<i>Reading is {dur(now - p['at'])} old</i>")
+    return lines
+
+
+def status_message(ps, extras, rows, now):
+    main = sorted((p for p in ps if p["pool"] in NUDGED), key=lambda p: URGENCY[verdict(p)])
+    blocks = ["\n".join(tool_block(p, ps, rows, now)) for p in main]
+    credits = (extras or {}).get("reset_credits", [])
+    if credits and any(verdict(p) == "ahead" or p["used"] >= 90 for p in main if p["pool"] == "codex"):
+        c = credits[0]
+        blocks.append(f"Codex has a {(c.get('title') or 'reset').lower()} credit"
+                      + (f" until {dt.datetime.fromtimestamp(c['expires_at']):%d %b}" if c.get("expires_at") else ""))
+    return f"<b>Weekly limits · {dt.datetime.fromtimestamp(now):%a %H:%M}</b>\n\n" + "\n\n".join(blocks)
+
+
+def plain(html):
+    return re.sub(r"<[^>]+>", "", html)
+
+
 def detail_lines(ps, extras, now):
     lines = []
     for p in ps:
@@ -544,22 +643,10 @@ def detail_lines(ps, extras, now):
 
 
 def nudge_text(due, all_ps, now, rows=()):
-    blocks = []
-    for p in due:
-        wpd = windows_per_day(p, all_ps, rows)
-        lines = [f"⏳ <b>{short_name(p)}: ~{p['unused']:.0f}% of this week will go unused</b>",
-                 f"{p['used']:.0f}% used · ~{100 - p['unused']:.0f}% at reset · {dur(p['left'])} left",
-                 f"Need <b>{per_day(p['need'])}</b> to use it all" + (f" (≈ {wpd[0]:.1f} full 5h windows)" if wpd else "")]
-        extra = [f"Last week {p['prev']['used']:.0f}%"] if p.get("prev") else []
-        if p["pool"] == "claude":
-            extra += [f"{short_name(s).strip()} {s['used']:.0f}%" for s in all_ps
-                      if s["pool"].startswith("claude-") and not is_session(s) and not s.get("rolled") and same_window(s, p)]
-        if extra:
-            lines.append(" · ".join(extra))
-        if now - p["at"] > 3 * 3600:
-            lines.append(f"<i>Reading is {dur(now - p['at'])} old</i>")
-        blocks.append("\n".join(lines))
-    return "\n\n".join(blocks)
+    return "\n\n".join("\n".join(tool_block(
+        p, all_ps, rows, now,
+        header=f"⏳ <b>{short_name(p)}: ~{p['unused']:.0f}% of this week will go unused</b> · resets {when(p['resets_at'], now)}"))
+        for p in due)
 
 
 # ── Nudging ─────────────────────────────────────────────────────────────────
@@ -663,14 +750,13 @@ def cmd_status(send, verbose):
     if not ps:
         print("no readings")
         return
-    title = f"Weekly limits · {dt.datetime.fromtimestamp(now):%a %H:%M}"
-    table = "\n".join(table_lines(ps, extras, now, rows))
-    print(title + "\n\n" + table)
+    msg = status_message(ps, extras, rows, now)
+    print(plain(msg))
     if verbose:
+        print("\n" + "\n".join(table_lines(ps, extras, now, rows)))
         print("\n" + "\n".join(detail_lines(ps, extras, now)))
     if send:
-        esc = table.replace("&", "&amp;").replace("<", "&lt;")
-        err = telegram(f"<b>{title}</b>\n<pre>{esc}</pre>", silent=False)
+        err = telegram(msg, silent=False)
         print(f"telegram: {err or 'sent'}")
 
 
