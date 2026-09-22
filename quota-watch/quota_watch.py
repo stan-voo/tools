@@ -101,6 +101,11 @@ GAP = float(CONFIG.get("QUOTA_WATCH_GAP", 15))  # points on track to expire befo
 # Hours before reset; each fires at most once per window.
 CHECKPOINTS_H = tuple(int(h) for h in CONFIG.get("QUOTA_WATCH_CHECKPOINTS", "96,48,24,10").split(",") if h.strip())
 MIN_LEFT = 3 * 3600          # inside this, nothing heavy can still be scheduled: stay quiet
+# A reading this old is flagged as stale, and no weekly nudge is built on it.
+# A window nudge fires in a window's last 90 minutes, so it needs fresher.
+STALE = 3 * 3600
+WINDOW_FRESH = 3600
+TOOL_ORDER = {"claude": 0, "codex": 1}   # every message lists Claude first, then Codex
 # Local hours when Telegram still delivers, but silently.
 QUIET = tuple(int(h) for h in CONFIG.get("QUOTA_WATCH_QUIET", "23-8").split("-"))
 # The window nudge: a 5h window about to reset with most of it unused, while
@@ -531,8 +536,8 @@ def table_lines(ps, extras, now, rows=()):
                 notes.append(f"{name} need ≈ {wpd[0]:.1f} full 5h windows/day (one ≈ {wpd[1]:.0f}% of the week)")
         if p["full_at"] and p["full_at"] < p["resets_at"]:
             notes.append(f"{name.strip()} hits 100% ~{when(p['full_at'], now)}")
-        if now - p["at"] > 3 * 3600 and p.get("primary"):
-            notes.append(f"{name.strip()} reading is {dur(now - p['at'])} old")
+        if stale_note(p, now) and p.get("primary"):
+            notes.append(plain(stale_note(p, now)))
     prev = [f"{short_name(p).strip()} {p['prev']['used']:.0f}%" for p in ps if p.get("prev")]
     if prev:
         notes.insert(0, "last week: " + " · ".join(prev))
@@ -552,9 +557,6 @@ def verdict(p):
     return "behind" if p["unused"] >= GAP else "close" if p["unused"] >= 5 else "on track"
 
 
-URGENCY = {"behind": 0, "ahead": 1, "close": 2, "too early": 3, "on track": 4, "reset": 5}
-
-
 def rate(p):
     """The busier of the two paces, %/s: the one every projection judges on."""
     xs = [x for x in (p["pace"], p["pace24"]) if x is not None]
@@ -565,13 +567,28 @@ def times(m):
     return "about the same" if 0.9 <= m <= 1.1 else f"{m:.1f}×"
 
 
-def tool_block(p, ps, rows, now, header=None):
-    """What a tool's week means, in a few short lines: where it stands, and
-    what would use it all against your pace."""
+def stale_note(p, now):
+    """Said plainly when this run could not refresh a reading, else None."""
+    if now - p["at"] <= STALE:
+        return None
+    return f"<i>{tool_of(p).capitalize()} numbers are from {when(p['at'], now)}: the live check failed</i>"
+
+
+def quoted(lines):
+    """The numbers behind a message, in a quote Telegram lets you collapse."""
+    return f"<blockquote expandable>{chr(10).join(lines)}</blockquote>" if lines else ""
+
+
+def tool_block(p, ps, rows, now, header=None, shown=()):
+    """What a tool's week means. On show: the headline, when it resets, and any
+    advice. In the quote: the numbers behind it. `shown` are siblings the
+    message already has a block for, left out of the quote."""
     name, v = short_name(p), verdict(p)
     if v == "reset":
-        return [f"<b>{name}</b> · reset, no reading from the new week yet"]
-    lines = [header or f"<b>{name} · {v}</b> · resets {when(p['resets_at'], now)}"]
+        return f"<b>{name}</b> · reset, no reading from the new week yet"
+    top = [header or f"<b>{name} · {v}</b>", f"Resets {when(p['resets_at'], now)}"]
+    top += [n for n in [stale_note(p, now)] if n]
+    advice, lines = [], []
     need, r = p["need"] * 86400, rate(p)
     r_day = r * 86400 if r is not None else None
     if r_day is None:
@@ -587,11 +604,11 @@ def tool_block(p, ps, rows, now, header=None):
         # work can move to another model instead of stopping.
         room = next((s for s in siblings(p, ps) if s["pool"] == tool_of(p)), None)
         if room and not room.get("rolled") and room["used"] < p["used"] - 10:
-            lines.append(f"All models is at {room['used']:.0f}%: move work to other models")
+            advice.append(f"All models is at {room['used']:.0f}%: move work to other models")
         else:
             room = None
     elif v == "on track":
-        lines.append("On pace to use it all")
+        advice.append("On pace to use it all")
     elif p["left"] >= MIN_LEFT:
         if r_day:
             base = f"{times(need / r_day)} your pace"
@@ -605,27 +622,46 @@ def tool_block(p, ps, rows, now, header=None):
         wpd = windows_per_day(p, ps, rows)
         if extra and wpd:
             lines.append(f"≈ {wpd[0]:.1f} full 5h windows a day")
-    subs = sorted((s for s in siblings(p, ps) if not s.get("rolled") and s is not room), key=lambda s: not is_session(s))
+    subs = sorted((s for s in siblings(p, ps) if not s.get("rolled") and s is not room and s not in shown),
+                  key=lambda s: not is_session(s))
     if subs:
         lines.append(" · ".join(f"{short_name(s).strip()} {'window ' if is_session(s) else ''}{s['used']:.0f}%"
                                 + (f", resets {when(s['resets_at'], now)}" if is_session(s) else "") for s in subs))
-    if now - p["at"] > 3 * 3600:
-        lines.append(f"<i>Reading is {dur(now - p['at'])} old</i>")
-    return lines
+    return "\n\n".join(x for x in ("\n".join(top), "\n".join(advice), quoted(lines)) if x)
+
+
+def window_block(s, now):
+    """A 5h window in the status message: how much is used, and when it resets."""
+    top = [f"⏱ <b>{tool_of(s).capitalize()} 5h window: {s['used']:.0f}% used</b>",
+           f"Resets {when(s['resets_at'], now)}, in {dur(s['left'])}"]
+    return "\n".join(top + [n for n in [stale_note(s, now)] if n])
+
+
+def by_tool(ps):
+    return sorted(ps, key=lambda p: TOOL_ORDER.get(tool_of(p), len(TOOL_ORDER)))
 
 
 def status_message(ps, extras, rows, now):
-    main = sorted((p for p in ps if p.get("primary")), key=lambda p: URGENCY[verdict(p)])
-    blocks = ["\n".join(tool_block(p, ps, rows, now)) for p in main]
+    """Claude first, its 5h window above its week, then Codex the same way."""
+    blocks = []
+    for p in by_tool(q for q in ps if q.get("primary")):
+        s = session_pool(p, ps)
+        s = s if s and not s.get("rolled") else None
+        if s:
+            blocks.append(window_block(s, now))
+        blocks.append(tool_block(p, ps, rows, now, shown=[s] if s else ()))
     credits = (extras or {}).get("reset_credits", [])
-    if credits and any(verdict(p) == "ahead" or p["used"] >= 90 for p in main if p["pool"] == "codex"):
+    if credits and any(verdict(p) == "ahead" or p["used"] >= 90 for p in ps if p["pool"] == "codex"):
         c = credits[0]
         blocks.append(f"Codex has a {(c.get('title') or 'reset').lower()} credit"
                       + (f" until {dt.datetime.fromtimestamp(c['expires_at']):%d %b}" if c.get("expires_at") else ""))
-    return f"<b>Weekly limits · {dt.datetime.fromtimestamp(now):%a %H:%M}</b>\n\n" + "\n\n".join(blocks)
+    return f"<b>Usage limits · {dt.datetime.fromtimestamp(now):%a %H:%M}</b>\n\n" + "\n\n".join(blocks)
 
 
 def plain(html):
+    """Telegram HTML as terminal or notification text: a quote's lines get a bar."""
+    html = re.sub(r"<blockquote[^>]*>(.*?)</blockquote>",
+                  lambda m: "\n".join("▍ " + l for l in m.group(1).split("\n")), html, flags=re.S)
     return re.sub(r"<[^>]+>", "", html)
 
 
@@ -654,7 +690,7 @@ def detail_lines(ps, extras, now):
         if p.get("prev"):
             lines.append(f"    last week ended at {p['prev']['used']:.0f}% or more")
         age = now - p["at"]
-        lines.append(f"    as of {when(p['at'], now)} via {p['source']}" + (f"  ({dur(age)} old)" if age > 3 * 3600 else ""))
+        lines.append(f"    as of {when(p['at'], now)} via {p['source']}" + (f"  ({dur(age)} old)" if age > STALE else ""))
     for c in (extras or {}).get("reset_credits", []):
         exp = f", expires {when(c['expires_at'], now)}" if c.get("expires_at") else ""
         lines.append(f"Codex reset credit available: {c.get('title') or 'reset'}{exp}")
@@ -662,10 +698,20 @@ def detail_lines(ps, extras, now):
 
 
 def nudge_text(due, all_ps, now, rows=()):
-    return "\n\n".join("\n".join(tool_block(
+    return "\n\n".join(tool_block(
         p, all_ps, rows, now,
-        header=f"⏳ <b>{short_name(p)}: ~{p['unused']:.0f}% of this week will go unused</b> · resets {when(p['resets_at'], now)}"))
+        header=f"⏳ <b>{short_name(p)}: ~{p['unused']:.0f}% of this week will go unused</b>")
         for p in due)
+
+
+def tick_text(due, adue, wdue, ps, now, rows=()):
+    """Everything due this run, in one message. Claude first, then Codex; within
+    a tool, its 5h window, then a run-out warning, then the weekly nudge."""
+    parts = [(d[0], 0, window_text([d], ps, now, rows)) for d in wdue]
+    parts += [(d[0], 1, ahead_text([d], ps, now, rows)) for d in adue]
+    parts += [(d[0], 2, nudge_text([d[0]], ps, now, rows)) for d in due]
+    parts.sort(key=lambda x: (TOOL_ORDER.get(tool_of(x[0]), len(TOOL_ORDER)), x[1]))
+    return "\n\n".join(t for _, _, t in parts)
 
 
 # ── Nudging ─────────────────────────────────────────────────────────────────
@@ -676,6 +722,10 @@ def due_nudges(ps, fired, now):
         if not p.get("primary"):
             continue
         if p.get("rolled") or p["unused"] is None or p["unused"] < GAP or p["left"] < MIN_LEFT:
+            continue
+        # Not on a stale reading. The checkpoint stays unsent, so it goes out
+        # on the next run that reads fresh.
+        if now - p["at"] > STALE:
             continue
         crossed = [c for c in CHECKPOINTS_H if p["left"] <= c * 3600]
         key = f"{p['pool']}@{round(p['resets_at'] / 3600)}"
@@ -693,6 +743,8 @@ def due_ahead_nudges(ps, fired, now):
     for p in ps:
         if not p.get("primary") or verdict(p) != "ahead" or p["resets_at"] - p["full_at"] < AHEAD_MARGIN:
             continue
+        if now - p["at"] > STALE:
+            continue
         key = f"{p['pool']}@{round(p['resets_at'] / 3600)}"
         tags = ["ahead"] + (["ahead-24h"] if p["full_at"] - now <= 86400 else [])
         if not set(tags) <= set(fired.get(key, [])):
@@ -701,9 +753,9 @@ def due_ahead_nudges(ps, fired, now):
 
 
 def ahead_text(due, all_ps, now, rows=()):
-    return "\n\n".join("\n".join(tool_block(
+    return "\n\n".join(tool_block(
         p, all_ps, rows, now,
-        header=f"⚠️ <b>{short_name(p)} will run out {dur(p['resets_at'] - p['full_at'])} before its reset</b>"))
+        header=f"⚠️ <b>{short_name(p)} will run out {dur(p['resets_at'] - p['full_at'])} before its reset</b>")
         for p, _, _ in due)
 
 
@@ -723,6 +775,9 @@ def due_window_nudges(ps, fired, now, quiet):
             continue
         if not 5 * 60 <= s["left"] <= WINDOW_LEAD or 100 - s["used"] < WINDOW_ROOM:
             continue
+        # "Most of it unused" is only true of a fresh reading, of both limits.
+        if now - s["at"] > WINDOW_FRESH or now - week["at"] > WINDOW_FRESH:
+            continue
         key = f"{s['pool']}@{round(s['resets_at'] / 3600)}"
         if not fired.get(key):
             due.append((s, week, key))
@@ -734,14 +789,15 @@ def window_text(due, all_ps, now, rows=()):
     for s, week, _ in due:
         room = 100 - s["used"]
         wpd = windows_per_day(week, all_ps, rows)
-        worth = f" (≈ {room * wpd[1] / 100:.0f}% of the week)" if wpd else ""
         # The window is the tool's, not the leading limit's: Claude reports one
         # 5h window with no model attached, even while Fable leads its week.
-        blocks.append("\n".join([
-            f"⏱ <b>{tool_of(s).capitalize()} 5h window: {room:.0f}% unused{worth}</b>",
+        blocks.append("\n\n".join(x for x in (
+            f"⏱ <b>{tool_of(s).capitalize()} 5h window: {room:.0f}% unused</b>\n"
             f"Resets {when(s['resets_at'], now)}, in {dur(s['left'])}",
             f"The {short_name(week)} week (resets {when(week['resets_at'], now)}) is on track to leave "
-            f"~{week['unused']:.0f}% unused. A good moment to start something heavy."]))
+            f"~{week['unused']:.0f}% unused.",
+            "A good moment to start something heavy.",
+            quoted([f"The unused part ≈ {room * wpd[1] / 100:.0f}% of the week"] if wpd else [])) if x))
     return "\n\n".join(blocks)
 
 
@@ -817,14 +873,15 @@ def cmd_tick(dry_run):
     fired = load_json(FIRED, retries=0) or {}
     hour = dt.datetime.now().hour
     quiet = hour >= QUIET[0] or hour < QUIET[1]
+    for p in ps:
+        if p.get("primary") and now - p["at"] > STALE:
+            log(f"{p['pool']} reading is {dur(now - p['at'])} old: no nudge from it")
     due = due_nudges(ps, fired, now)
     adue = due_ahead_nudges(ps, fired, now)
     wdue = due_window_nudges(ps, fired, now, quiet)
     if not due and not adue and not wdue:
         return
-    text = "\n\n".join(t for t in (ahead_text(adue, ps, now, rows) if adue else "",
-                                    nudge_text([p for p, _, _ in due], ps, now, rows) if due else "",
-                                    window_text(wdue, ps, now, rows) if wdue else "") if t)
+    text = tick_text(due, adue, wdue, ps, now, rows)
     if dry_run:
         print(text)
         return
