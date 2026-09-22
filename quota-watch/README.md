@@ -3,7 +3,7 @@
 - **Two tools:** Claude Code and Codex.
 - **Local, macOS only:** one Python script and a LaunchAgent on your Mac. No server or account of its own.
 - **No credentials of its own:** it never opens your Claude or Codex auth files, and writes no credential anywhere. It asks each tool through that tool's own command (`claude /usage`, `codex app-server`), and those commands run on the login they already have, with the same access as always: quota-watch does not sandbox them. It loads the whole of Claude Code's `~/.claude.json` to pick out one key, `cachedUsageUtilization` (percentages and reset times), and keeps nothing else from it. When the app-server can't answer, and on the first run to seed history, it reads Codex's local session logs, which hold your conversations, and keeps only the rate-limit numbers. The only secret it handles is the Telegram bot token you give it, to send the messages.
-- **Audited:** Astra's [safety review](SAFETY-REVIEW.md) of 21 September 2026 found no critical or high-severity security issue. It found five other defects that are still open, listed under [Limits](#limits).
+- **Audited:** Astra's [safety review](SAFETY-REVIEW.md) of 21 September 2026 found no critical or high-severity security issue. It found five other defects. One is fixed, and four are still open, listed under [Limits](#limits).
 
 **A weekly allowance that resets at 77% is 23% of a subscription thrown away.** The limit resets whether you used it or not.
 
@@ -48,7 +48,9 @@ The headline says where the week stands. The quote holds the numbers behind it: 
 Usage limits · Mon 18:37
 
 ⏱ Claude 5h window: 7% used
-Resets 22:00, in 3h 23m
+Resets 22:00, in 3h 22m
+
+On pace: no need to push.
 
 Claude · too early
 Resets Mon 28 Sep 16:00
@@ -64,7 +66,9 @@ Resets Sat 26 Sep 16:20
 ▍ To use it all: 18.8%/day, 4.9× your pace
 ```
 
-When a reading could not be refreshed, its block says so under the reset line. A real one, from a run just after my Mac rebooted: "Codex numbers are from Mon 21 Sep 19:22: the live check failed".
+The line under the 5-hour window is advice for that window, judged against its week: "A good moment to start something heavy" while the week is behind and the window at least half unused, "Keep going: the week is still behind" once the window is more than half used, "Go easy: the week is on course to run out before its reset", or "On pace: no need to push". A week too young for a pace is judged by last week's.
+
+When a reading could not be refreshed, its block says so after its numbers and gives no advice. A real one, from a run just after my Mac rebooted: "Codex numbers are from Mon 21 Sep 19:22: the live check failed".
 
 The verdict after each name is one of: **behind** (15 points or more on track to go unused), **close** (5 to 15), **on track**, **ahead** (it will run out before the reset, and the message gives the daily rate that would last), or **too early** (under 12 hours into the week, so the comparison is with last week's pace). `status -v` adds a one-row-per-limit table and the working behind every number.
 
@@ -185,7 +189,7 @@ All optional, in the environment or in `~/.config/quota-watch/env`:
 - **Два інструменти:** Claude Code і Codex.
 - **Локально, лише macOS:** один Python-скрипт і LaunchAgent на вашому Маку. Жодного власного сервера чи акаунта.
 - **Жодних власних облікових даних:** він не відкриває файлів авторизації Claude чи Codex і ніде не записує облікових даних. Кожен інструмент він питає через його власну команду (`claude /usage`, `codex app-server`), а ці команди працюють на вже наявному логіні з тим самим доступом, що й завжди: quota-watch їх не ізолює. Файл Claude Code `~/.claude.json` він завантажує цілком, щоб узяти один ключ, `cachedUsageUtilization` (відсотки й час скидання), і нічого іншого звідти не зберігає. Коли app-server не відповідає, а також під час першого запуску, щоб заповнити історію, він читає локальні логи сесій Codex, де зберігаються ваші розмови, і бере з них лише цифри лімітів. Він торкається лише одного секрету: токена Телеграм-бота, який ви самі даєте йому для надсилання повідомлень.
-- **Перевірено:** [аудит безпеки](SAFETY-REVIEW.md) від Astra 21 вересня 2026 року не знайшов критичних чи серйозних проблем безпеки. Він знайшов п'ять інших вад, які ще не виправлено: вони в розділі [Обмеження](#обмеження).
+- **Перевірено:** [аудит безпеки](SAFETY-REVIEW.md) від Astra 21 вересня 2026 року не знайшов критичних чи серйозних проблем безпеки. Він знайшов п'ять інших вад. Одну виправлено, чотири ще ні: вони в розділі [Обмеження](#обмеження).
 
 **Якщо тижневий ліміт скинувся на 77%, то 23% підписки пішли на смітник.** Ліміт скидається незалежно від того, використали ви його чи ні.
 
@@ -228,7 +232,9 @@ Resets Wed 23 Sep 18:38
 Usage limits · Mon 18:37
 
 ⏱ Claude 5h window: 7% used
-Resets 22:00, in 3h 23m
+Resets 22:00, in 3h 22m
+
+On pace: no need to push.
 
 Claude · too early
 Resets Mon 28 Sep 16:00
@@ -244,7 +250,9 @@ Resets Sat 26 Sep 16:20
 ▍ To use it all: 18.8%/day, 4.9× your pace
 ```
 
-Якщо показання не вдалося оновити, блок каже про це під рядком скидання. Справжній приклад із запуску одразу після перезавантаження мого Мака: «Codex numbers are from Mon 21 Sep 19:22: the live check failed».
+Рядок під п'ятигодинним вікном дає пораду саме щодо цього вікна з огляду на його тиждень: «A good moment to start something heavy», поки тиждень відстає, а вікно використане не більше ніж наполовину; «Keep going: the week is still behind», коли вікно використане більше ніж наполовину; «Go easy: the week is on course to run out before its reset»; або «On pace: no need to push». Якщо тиждень надто молодий і темпу ще немає, його оцінюють за темпом минулого тижня.
+
+Якщо показання не вдалося оновити, блок каже про це після своїх цифр і не дає порад. Справжній приклад із запуску одразу після перезавантаження мого Мака: «Codex numbers are from Mon 21 Sep 19:22: the live check failed».
 
 Після назви стоїть вердикт: **behind** (за прогнозом згорить 15 пунктів і більше), **close** (від 5 до 15), **on track** (іде за планом), **ahead** (квота закінчиться до скидання, і повідомлення підкаже денну норму, якої вистачить) або **too early** (минуло менше 12 годин тижня, тож порівняння йде з темпом минулого тижня). `status -v` додає таблицю по рядку на ліміт і розрахунок за кожним числом.
 

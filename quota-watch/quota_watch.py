@@ -587,7 +587,6 @@ def tool_block(p, ps, rows, now, header=None, shown=()):
     if v == "reset":
         return f"<b>{name}</b> · reset, no reading from the new week yet"
     top = [header or f"<b>{name} · {v}</b>", f"Resets {when(p['resets_at'], now)}"]
-    top += [n for n in [stale_note(p, now)] if n]
     advice, lines = [], []
     need, r = p["need"] * 86400, rate(p)
     r_day = r * 86400 if r is not None else None
@@ -615,7 +614,7 @@ def tool_block(p, ps, rows, now, header=None, shown=()):
         elif p.get("prev"):
             last_day = p["prev"]["used"] / 7
             base = f"{times(need / last_day)} last week's {last_day:.0f}%/day (it ended at {p['prev']['used']:.0f}%)"
-            extra = max(0.0, 100 - p["used"] - last_day * p["left"] / 86400)
+            extra = expected_unused(p)
         else:
             base = None
         lines.append(f"To use it all: {need:.1f}%/day" + (f", {base}" if base else ""))
@@ -627,14 +626,44 @@ def tool_block(p, ps, rows, now, header=None, shown=()):
     if subs:
         lines.append(" · ".join(f"{short_name(s).strip()} {'window ' if is_session(s) else ''}{s['used']:.0f}%"
                                 + (f", resets {when(s['resets_at'], now)}" if is_session(s) else "") for s in subs))
-    return "\n\n".join(x for x in ("\n".join(top), "\n".join(advice), quoted(lines)) if x)
+    # No advice from numbers this run could not refresh; the note after them says so.
+    note = stale_note(p, now)
+    return "\n\n".join(x for x in ("\n".join(top), "" if note else "\n".join(advice), quoted(lines), note) if x)
 
 
-def window_block(s, now):
-    """A 5h window in the status message: how much is used, and when it resets."""
+def expected_unused(p):
+    """Points of the week on track to go unused: at the pace so far, or, in a
+    week too young for a pace, at last week's. None with neither."""
+    if p["unused"] is not None:
+        return p["unused"]
+    if p.get("prev"):
+        return max(0.0, 100 - p["used"] - p["prev"]["used"] / 7 * p["left"] / 86400)
+    return None
+
+
+def window_advice(s, week, now):
+    """What to do with a 5h window, given the week it counts toward. None when
+    either reading is stale, or there is nothing to judge the week by."""
+    if week is None or week.get("rolled") or stale_note(s, now) or stale_note(week, now):
+        return None
+    if verdict(week) == "ahead":
+        return "Go easy: the week is on course to run out before its reset."
+    unused = expected_unused(week)
+    if unused is None:
+        return None
+    if unused < GAP:
+        return "On pace: no need to push."
+    if 100 - s["used"] >= WINDOW_ROOM:
+        return "A good moment to start something heavy."
+    return "Keep going: the week is still behind."
+
+
+def window_block(s, week, now):
+    """A 5h window in the status message: how much is used, when it resets,
+    and what to do with it."""
     top = [f"⏱ <b>{tool_of(s).capitalize()} 5h window: {s['used']:.0f}% used</b>",
            f"Resets {when(s['resets_at'], now)}, in {dur(s['left'])}"]
-    return "\n".join(top + [n for n in [stale_note(s, now)] if n])
+    return "\n\n".join(x for x in ("\n".join(top), window_advice(s, week, now), stale_note(s, now)) if x)
 
 
 def by_tool(ps):
@@ -648,7 +677,7 @@ def status_message(ps, extras, rows, now):
         s = session_pool(p, ps)
         s = s if s and not s.get("rolled") else None
         if s:
-            blocks.append(window_block(s, now))
+            blocks.append(window_block(s, p, now))
         blocks.append(tool_block(p, ps, rows, now, shown=[s] if s else ()))
     credits = (extras or {}).get("reset_credits", [])
     if credits and any(verdict(p) == "ahead" or p["used"] >= 90 for p in ps if p["pool"] == "codex"):
@@ -796,7 +825,7 @@ def window_text(due, all_ps, now, rows=()):
             f"Resets {when(s['resets_at'], now)}, in {dur(s['left'])}",
             f"The {short_name(week)} week (resets {when(week['resets_at'], now)}) is on track to leave "
             f"~{week['unused']:.0f}% unused.",
-            "A good moment to start something heavy.",
+            window_advice(s, week, now),
             quoted([f"The unused part ≈ {room * wpd[1] / 100:.0f}% of the week"] if wpd else [])) if x))
     return "\n\n".join(blocks)
 
