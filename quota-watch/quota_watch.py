@@ -276,8 +276,8 @@ def codex_live(timeout=25):
 
 def codex_rollout_snapshots(since):
     """First and last rate-limit snapshot of each rollout log modified after
-    `since`. Both ends, so a burst inside one session is visible in history
-    (heaviest_hour needs where it started, not only where it finished)."""
+    `since`. Both ends, so a burst inside one session is visible in history,
+    where it started as well as where it finished."""
     out = []
     for f in glob.glob(os.path.join(CODEX_SESSIONS, "*/*/*/rollout-*.jsonl")):
         try:
@@ -561,29 +561,13 @@ def rate(p):
     return max(xs) if xs else None
 
 
-def heaviest_hour(pool, rows, now, days=14):
-    """(points, start) of the biggest rise within about an hour in the last
-    `days`, same window. A unit Stan remembers doing, so a gap can be stated as
-    "N more hours like that one". None below 5 points: too small to plan with."""
-    pts = sorted((h["at"], h["used"], h["resets_at"]) for h in rows
-                 if h["pool"] == pool and h["at"] > now - days * 86400)
-    best = (0.0, None)
-    for i, (t0, u0, r0) in enumerate(pts):
-        for t1, u1, r1 in pts[i + 1:]:
-            if t1 - t0 > 75 * 60:
-                break
-            if abs(r1 - r0) < 3600 and u1 - u0 > best[0]:
-                best = (u1 - u0, t0)
-    return best if best[0] >= 5 else None
-
-
 def times(m):
     return "about the same" if 0.9 <= m <= 1.1 else f"{m:.1f}×"
 
 
 def tool_block(p, ps, rows, now, header=None):
-    """What a tool's week means, in four short lines: where it stands, what
-    would use it all against your pace, and that gap in units you can plan with."""
+    """What a tool's week means, in a few short lines: where it stands, and
+    what would use it all against your pace."""
     name, v = short_name(p), verdict(p)
     if v == "reset":
         return [f"<b>{name}</b> · reset, no reading from the new week yet"]
@@ -618,10 +602,8 @@ def tool_block(p, ps, rows, now, header=None):
         else:
             base = None
         lines.append(f"To use it all: {need:.1f}%/day" + (f", {base}" if base else ""))
-        hh, wpd = heaviest_hour(p["pool"], rows, now), windows_per_day(p, ps, rows)
-        if extra and hh:
-            lines.append(f"≈ {extra / hh[0]:.1f} more hours like {when(hh[1], now)} (+{hh[0]:.0f} in an hour)")
-        elif extra and wpd:
+        wpd = windows_per_day(p, ps, rows)
+        if extra and wpd:
             lines.append(f"≈ {wpd[0]:.1f} full 5h windows a day")
     subs = sorted((s for s in siblings(p, ps) if not s.get("rolled") and s is not room), key=lambda s: not is_session(s))
     if subs:
@@ -753,10 +735,13 @@ def window_text(due, all_ps, now, rows=()):
         room = 100 - s["used"]
         wpd = windows_per_day(week, all_ps, rows)
         worth = f" (≈ {room * wpd[1] / 100:.0f}% of the week)" if wpd else ""
+        # The window is the tool's, not the leading limit's: Claude reports one
+        # 5h window with no model attached, even while Fable leads its week.
         blocks.append("\n".join([
-            f"⏱ <b>{short_name(week)} 5h window: {room:.0f}% unused{worth}</b>",
+            f"⏱ <b>{tool_of(s).capitalize()} 5h window: {room:.0f}% unused{worth}</b>",
             f"Resets {when(s['resets_at'], now)}, in {dur(s['left'])}",
-            f"The week is on track to leave ~{week['unused']:.0f}% unused. A good moment to start something heavy."]))
+            f"The {short_name(week)} week (resets {when(week['resets_at'], now)}) is on track to leave "
+            f"~{week['unused']:.0f}% unused. A good moment to start something heavy."]))
     return "\n\n".join(blocks)
 
 
