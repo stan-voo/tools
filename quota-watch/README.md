@@ -33,7 +33,7 @@ It stays quiet in the first 12 hours of a week, when a pace is one session's noi
 A weekly nudge from a simulated 48-hour checkpoint (made-up numbers). Lines marked ▍ are sent as a collapsible quote:
 
 ```
-⏳ Codex: ~79% of this week will go unused
+📕 Codex: ~79% of this week will go unused
 Resets Wed 23 Sep 18:38
 
 ▍ 15% used · pace 3.0%/day → ~21% at reset
@@ -52,32 +52,32 @@ Resets 22:00, in 3h 22m
 
 On pace: no need to push.
 
-Claude · too early
+📓 Claude · too early to tell
 Resets Mon 28 Sep 16:00
 
 ▍ 5% used, 2h 37m into the week
 ▍ To use it all: 13.8%/day, 1.1× last week's 12%/day (it ended at 85%)
 ▍ Fable 6%
 
-Codex · behind
+📕 Codex · ~73% to fill
 Resets Sat 26 Sep 16:20
 
 ▍ 8% used · pace 3.8%/day → ~27% at reset
 ▍ To use it all: 18.8%/day, 4.9× your pace
 ```
 
-The line under the 5-hour window is advice for that window, judged against its week: "A good moment to start something heavy" while the week is behind and the window at least half unused, "Keep going: the week is still behind" once the window is more than half used, "Go easy: the week is on course to run out before its reset", or "On pace: no need to push". A week too young for a pace is judged by last week's.
+The line under the 5-hour window is advice for that window, judged against its week: "A good moment to start something heavy" while the week has room to fill and the window is at least half unused, "Keep going: the week still has room to fill" once the window is more than half used, "Go easy: the week is on course to run out before its reset", or "On pace: no need to push". A week too young for a pace is judged by last week's.
 
 When a reading could not be refreshed, its block says so after its numbers and gives no advice. A real one, from a run just after my Mac rebooted: "Codex numbers are from Mon 21 Sep 19:22: the live check failed".
 
-The verdict after each name is one of: **behind** (15 points or more on track to go unused), **close** (5 to 15), **on track**, **ahead** (it will run out before the reset, and the message gives the daily rate that would last), or **too early** (under 12 hours into the week, so the comparison is with last week's pace). `status -v` adds a one-row-per-limit table and the working behind every number.
+Each name carries a colour and a few words about how full the week will be at its reset: 📕 **~N% to fill** (15 points or more on track to go unused), 📒 **~N% to fill** (5 to 15), 📗 **on pace to fill**, 📙 **runs out early** (it will run out before the reset, and the message gives the daily rate that would last), or 📓 **too early to tell** (under 12 hours into the week, so the comparison is with last week's pace). The colours read like a traffic light: red is the most quota left on the table. `status -v` adds a one-row-per-limit table and the working behind every number.
 
 **Which Claude limit leads.** By default, Claude's messages follow the all-models limit. Some people run out of one model first; for me that's Fable. `QUOTA_WATCH_CLAUDE_LIMIT=fable` makes the Fable limit lead Claude's block and every Claude nudge, and moves all models into the quote.
 
 **Running out early.** The leading limit gets one more message: a warning when it is on course to run out at least 6 hours before its reset. It comes once when first seen and once more within a day of running out. It gives the daily rate that would last, and says whether other models still have room (made-up numbers):
 
 ```
-⚠️ Claude Fable will run out 2d 17h before its reset
+📙 Claude Fable will run out 2d 17h before its reset
 Resets Fri 25 Sep 18:35
 
 All models is at 40%: move work to other models
@@ -89,7 +89,7 @@ All models is at 40%: move work to other models
 
 In `status` the 5-hour window sits above its week, and in a nudge it goes in the quote. It caps how fast you can spend the week, so its first job is sizing. Once history holds a full window's worth of 5-hour movement, quota-watch measures how much of the week one full 5-hour window is worth, and states the gap in windows, in the quote: "≈ 1.9 full 5h windows a day". My Codex plan (prolite) currently reports no 5-hour window. If yours has one, it shows up the same way.
 
-Its second job is a smaller nudge. A window's unused part is gone when it resets, and while the week is behind, that is capacity you can't get back. So when a 5-hour window resets within 90 minutes with at least half of it unused, and the week is behind by the same 15-point test, you get (made-up numbers):
+Its second job is a smaller nudge. A window's unused part is gone when it resets, and while the week has room to fill, that is capacity you can't get back. So when a 5-hour window resets within 90 minutes with at least half of it unused, and the week has 15 points or more to fill (the weekly nudge's test), you get (made-up numbers):
 
 ```
 ⏱ Claude 5h window: 70% unused
@@ -122,7 +122,7 @@ codenotch is plainly better at everything else: a glanceable view, many provider
 ## Limits
 
 - **Four known defects.** Astra's [safety review](SAFETY-REVIEW.md) found five on 21 September 2026. One is fixed: a nudge could recommend heavy work on hours-old readings (finding 2). Four are open. The Codex read can hang past its timeout or miss a reply. A failed notification is still marked as sent, and never retried. `CODEX_HOME` or `CLAUDE_CONFIG_DIR` set only in `~/.config/quota-watch/env` doesn't reach `claude` or `codex`, so a reading can come from the wrong account. A reinstall from a path containing characters like `&` can leave the LaunchAgent stopped. The review's advice: fix them before depending on unattended monitoring.
-- **Two tools.** Claude Code and Codex. A 5-hour window nudges only while its week is behind; on a week that's on pace it stays silent.
+- **Two tools.** Claude Code and Codex. A 5-hour window nudges only while its week has room to fill; on a week that's on pace it stays silent.
 - **Hourly ticks can miss a window.** The window nudge needs a tick inside the 90 minutes before a reset. A Mac asleep through that stretch sends nothing, and so does a tick that can't refresh the reading.
 - **The windows-per-day figure needs data.** It stays hidden until history holds at least one full window's worth of 5-hour movement, and it assumes the week-to-window ratio holds steady. Both limits report whole percents, so treat it as approximate.
 - **macOS.** Scheduling is a LaunchAgent, and the fallback is a macOS notification. The script is plain Python 3.9+ with no dependencies, so it should run from cron on Linux, but I have not tried it.
@@ -217,7 +217,7 @@ quota-watch щогодини читає обидва тижневі ліміти
 Тижневе нагадування із симуляції точки за 48 годин до скидання (цифри вигадані). Рядки з позначкою ▍ надсилаються як цитата, яку можна згорнути:
 
 ```
-⏳ Codex: ~79% of this week will go unused
+📕 Codex: ~79% of this week will go unused
 Resets Wed 23 Sep 18:38
 
 ▍ 15% used · pace 3.0%/day → ~21% at reset
@@ -236,32 +236,32 @@ Resets 22:00, in 3h 22m
 
 On pace: no need to push.
 
-Claude · too early
+📓 Claude · too early to tell
 Resets Mon 28 Sep 16:00
 
 ▍ 5% used, 2h 37m into the week
 ▍ To use it all: 13.8%/day, 1.1× last week's 12%/day (it ended at 85%)
 ▍ Fable 6%
 
-Codex · behind
+📕 Codex · ~73% to fill
 Resets Sat 26 Sep 16:20
 
 ▍ 8% used · pace 3.8%/day → ~27% at reset
 ▍ To use it all: 18.8%/day, 4.9× your pace
 ```
 
-Рядок під п'ятигодинним вікном дає пораду саме щодо цього вікна з огляду на його тиждень: «A good moment to start something heavy», поки тиждень відстає, а вікно використане не більше ніж наполовину; «Keep going: the week is still behind», коли вікно використане більше ніж наполовину; «Go easy: the week is on course to run out before its reset»; або «On pace: no need to push». Якщо тиждень надто молодий і темпу ще немає, його оцінюють за темпом минулого тижня.
+Рядок під п'ятигодинним вікном дає пораду саме щодо цього вікна з огляду на його тиждень: «A good moment to start something heavy», поки в тижні лишається місце, а вікно використане не більше ніж наполовину; «Keep going: the week still has room to fill», коли вікно використане більше ніж наполовину; «Go easy: the week is on course to run out before its reset»; або «On pace: no need to push». Якщо тиждень надто молодий і темпу ще немає, його оцінюють за темпом минулого тижня.
 
 Якщо показання не вдалося оновити, блок каже про це після своїх цифр і не дає порад. Справжній приклад із запуску одразу після перезавантаження мого Мака: «Codex numbers are from Mon 21 Sep 19:22: the live check failed».
 
-Після назви стоїть вердикт: **behind** (за прогнозом згорить 15 пунктів і більше), **close** (від 5 до 15), **on track** (іде за планом), **ahead** (квота закінчиться до скидання, і повідомлення підкаже денну норму, якої вистачить) або **too early** (минуло менше 12 годин тижня, тож порівняння йде з темпом минулого тижня). `status -v` додає таблицю по рядку на ліміт і розрахунок за кожним числом.
+Біля кожної назви стоїть колір і кілька слів про те, наскільки заповниться тиждень до скидання: 📕 **~N% to fill** (за прогнозом згорить 15 пунктів і більше), 📒 **~N% to fill** (від 5 до 15), 📗 **on pace to fill** (тиждень заповниться), 📙 **runs out early** (квота закінчиться до скидання, і повідомлення підкаже денну норму, якої вистачить) або 📓 **too early to tell** (минуло менше 12 годин тижня, тож порівняння йде з темпом минулого тижня). Кольори читаються як сигнали світлофора: червоний означає, що невикористаним лишається найбільше. `status -v` додає таблицю по рядку на ліміт і розрахунок за кожним числом.
 
 **Який ліміт Claude головний.** Типово повідомлення про Claude стежать за лімітом на всі моделі. Дехто спершу вичерпує ліміт окремої моделі, у мене це Fable. `QUOTA_WATCH_CLAUDE_LIMIT=fable` робить ліміт Fable головним у блоці Claude і в усіх нагадуваннях про Claude, а ліміт на всі моделі переходить у цитату.
 
 **Квота закінчиться раніше.** Головний ліміт отримує ще одне повідомлення: попередження, коли за прогнозом він вичерпається щонайменше за 6 годин до скидання. Воно приходить раз, коли це вперше видно, і ще раз протягом доби до вичерпання. У ньому є денна норма, якої вистачить до скидання, і сказано, чи лишилось місце в інших моделях (цифри вигадані):
 
 ```
-⚠️ Claude Fable will run out 2d 17h before its reset
+📙 Claude Fable will run out 2d 17h before its reset
 Resets Fri 25 Sep 18:35
 
 All models is at 40%: move work to other models
@@ -273,7 +273,7 @@ All models is at 40%: move work to other models
 
 У `status` п'ятигодинне вікно стоїть над своїм тижнем, а в нагадуванні потрапляє в цитату. Воно обмежує, як швидко можна витрачати тиждень, тож перша його робота в тому, щоб перевести норму в зрозумілі одиниці. Щойно в історії набереться рух на ціле п'ятигодинне вікно, quota-watch виміряє, скільки тижня коштує одне повне вікно, і покаже розрив у вікнах, у цитаті: «≈ 1.9 full 5h windows a day». Мій план Codex (prolite) зараз п'ятигодинного вікна не має. Якщо ваш має, воно з'явиться так само.
 
-Друга його робота полягає в меншому нагадуванні. Невикористана частина вікна згорає при скиданні, і поки тиждень відстає, цю ємність уже не повернути. Тож коли п'ятигодинне вікно скидається протягом 90 хвилин, щонайменше половина його не використана, а тиждень відстає за тим самим правилом 15 пунктів, приходить таке (цифри вигадані):
+Друга його робота полягає в меншому нагадуванні. Невикористана частина вікна згорає при скиданні, і поки в тижні лишається місце, цю ємність уже не повернути. Тож коли п'ятигодинне вікно скидається протягом 90 хвилин, щонайменше половина його не використана, а в тижні за прогнозом згорить 15 пунктів і більше (те саме правило, що й для тижневого нагадування), приходить таке (цифри вигадані):
 
 ```
 ⏱ Claude 5h window: 70% unused
@@ -306,7 +306,7 @@ quota-watch відрізняється чотирма речами. Підозр
 ## Обмеження
 
 - **Чотири відомі вади.** [Аудит безпеки](SAFETY-REVIEW.md) від Astra знайшов п'ять 21 вересня 2026 року. Одну виправлено: нагадування могло радити важку роботу на підставі показань, яким уже кілька годин (пункт 2). Чотири лишаються. Читання Codex може не вкластися в таймаут і зависнути або пропустити відповідь. Невдале сповіщення все одно позначається як надіслане, і повторної спроби не буде. `CODEX_HOME` чи `CLAUDE_CONFIG_DIR`, задані лише в `~/.config/quota-watch/env`, не доходять до `claude` і `codex`, тож показання може прийти з іншого акаунта. Перевстановлення зі шляху, де є символи на кшталт `&`, може залишити LaunchAgent зупиненим. Порада аудиту: виправити їх, перш ніж покладатися на моніторинг без нагляду.
-- **Два інструменти.** Claude Code і Codex. П'ятигодинне вікно нагадує лише тоді, коли його тиждень відстає. Якщо тиждень іде за планом, воно мовчить.
+- **Два інструменти.** Claude Code і Codex. П'ятигодинне вікно нагадує лише тоді, коли в його тижні лишається місце. Якщо тиждень іде за планом, воно мовчить.
 - **Щогодинні перевірки можуть проґавити вікно.** Нагадуванню про вікно потрібна перевірка в останні 90 хвилин перед скиданням. Якщо Мак у цей час спить або перевірка не змогла оновити показання, нічого не прийде.
 - **Кількості вікон на день потрібні дані.** Цей рядок не з'явиться, доки в історії не набереться рух хоча б на одне повне п'ятигодинне вікно. До того ж він припускає, що співвідношення тижня й вікна стабільне. Обидва ліміти звітують цілими відсотками, тож цифра приблизна.
 - **macOS.** Розклад тримається на LaunchAgent, а коли Телеграм недоступний, приходить сповіщення macOS. Сам скрипт написаний на чистому Python 3.9+ без залежностей, тож на Linux мав би працювати з cron, але я не перевіряв.

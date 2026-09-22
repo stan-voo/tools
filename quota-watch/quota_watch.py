@@ -557,6 +557,19 @@ def verdict(p):
     return "behind" if p["unused"] >= GAP else "close" if p["unused"] >= 5 else "on track"
 
 
+# Each verdict wears a colour that reads like a traffic light, without the
+# light: red is the most quota left on the table, green a week that fills.
+LOOKS = {"behind": "📕", "close": "📒", "on track": "📗", "ahead": "📙", "too early": "📓"}
+
+
+def verdict_label(p):
+    """The verdict in words about filling the week, not about pace."""
+    v = verdict(p)
+    if v in ("behind", "close"):
+        return f"~{p['unused']:.0f}% to fill"
+    return {"on track": "on pace to fill", "ahead": "runs out early", "too early": "too early to tell"}[v]
+
+
 def rate(p):
     """The busier of the two paces, %/s: the one every projection judges on."""
     xs = [x for x in (p["pace"], p["pace24"]) if x is not None]
@@ -586,7 +599,7 @@ def tool_block(p, ps, rows, now, header=None, shown=()):
     name, v = short_name(p), verdict(p)
     if v == "reset":
         return f"<b>{name}</b> · reset, no reading from the new week yet"
-    top = [header or f"<b>{name} · {v}</b>", f"Resets {when(p['resets_at'], now)}"]
+    top = [header or f"{LOOKS[v]} <b>{name} · {verdict_label(p)}</b>", f"Resets {when(p['resets_at'], now)}"]
     advice, lines = [], []
     need, r = p["need"] * 86400, rate(p)
     r_day = r * 86400 if r is not None else None
@@ -655,7 +668,7 @@ def window_advice(s, week, now):
         return "On pace: no need to push."
     if 100 - s["used"] >= WINDOW_ROOM:
         return "A good moment to start something heavy."
-    return "Keep going: the week is still behind."
+    return "Keep going: the week still has room to fill."
 
 
 def window_block(s, week, now):
@@ -729,7 +742,7 @@ def detail_lines(ps, extras, now):
 def nudge_text(due, all_ps, now, rows=()):
     return "\n\n".join(tool_block(
         p, all_ps, rows, now,
-        header=f"⏳ <b>{short_name(p)}: ~{p['unused']:.0f}% of this week will go unused</b>")
+        header=f"{LOOKS[verdict(p)]} <b>{short_name(p)}: ~{p['unused']:.0f}% of this week will go unused</b>")
         for p in due)
 
 
@@ -784,7 +797,7 @@ def due_ahead_nudges(ps, fired, now):
 def ahead_text(due, all_ps, now, rows=()):
     return "\n\n".join(tool_block(
         p, all_ps, rows, now,
-        header=f"⚠️ <b>{short_name(p)} will run out {dur(p['resets_at'] - p['full_at'])} before its reset</b>")
+        header=f"{LOOKS['ahead']} <b>{short_name(p)} will run out {dur(p['resets_at'] - p['full_at'])} before its reset</b>")
         for p, _, _ in due)
 
 
@@ -852,8 +865,8 @@ def telegram(text, silent):
 def mac_notify(text):
     if sys.platform != "darwin":
         return
-    plain = re.sub(r"<[^>]+>", "", text).split("\n")
-    title, body = plain[0].lstrip("⏳ "), " · ".join(x for x in plain[1:3] if x)
+    plain = [x for x in re.sub(r"<[^>]+>", "", text).split("\n") if x.strip()]
+    title, body = re.sub(r"^\W+", "", plain[0]), " · ".join(plain[1:3])
     script = f'display notification {json.dumps(body)} with title {json.dumps(title)}'
     subprocess.run(["osascript", "-e", script], capture_output=True)
 
