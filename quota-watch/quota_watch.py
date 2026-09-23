@@ -557,9 +557,9 @@ def verdict(p):
     return "behind" if p["unused"] >= GAP else "close" if p["unused"] >= 5 else "on track"
 
 
-# Each verdict wears a colour that reads like a traffic light, without the
-# light: red is the most quota left on the table, green a week that fills.
-LOOKS = {"behind": "📕", "close": "📒", "on track": "📗", "ahead": "📙", "too early": "📓"}
+# Each verdict wears a colour that reads like a fuel gauge: green is the most
+# quota still left to use, red a week that runs dry before its reset.
+LOOKS = {"behind": "📗", "close": "📒", "on track": "📙", "ahead": "📕", "too early": "📓"}
 
 
 def verdict_label(p):

@@ -33,7 +33,7 @@ It stays quiet in the first 12 hours of a week, when a pace is one session's noi
 A weekly nudge from a simulated 48-hour checkpoint (made-up numbers). Lines marked ▍ are sent as a collapsible quote:
 
 ```
-📕 Codex: ~79% of this week will go unused
+📗 Codex: ~79% of this week will go unused
 Resets Wed 23 Sep 18:38
 
 ▍ 15% used · pace 3.0%/day → ~21% at reset
@@ -59,7 +59,7 @@ Resets Mon 28 Sep 16:00
 ▍ To use it all: 13.8%/day, 1.1× last week's 12%/day (it ended at 85%)
 ▍ Fable 6%
 
-📕 Codex · ~73% to fill
+📗 Codex · ~73% to fill
 Resets Sat 26 Sep 16:20
 
 ▍ 8% used · pace 3.8%/day → ~27% at reset
@@ -70,14 +70,14 @@ The line under the 5-hour window is advice for that window, judged against its w
 
 When a reading could not be refreshed, its block says so after its numbers and gives no advice. A real one, from a run just after my Mac rebooted: "Codex numbers are from Mon 21 Sep 19:22: the live check failed".
 
-Each name carries a colour and a few words about how full the week will be at its reset: 📕 **~N% to fill** (15 points or more on track to go unused), 📒 **~N% to fill** (5 to 15), 📗 **on pace to fill**, 📙 **runs out early** (it will run out before the reset, and the message gives the daily rate that would last), or 📓 **too early to tell** (under 12 hours into the week, so the comparison is with last week's pace). The colours read like a traffic light: red is the most quota left on the table. `status -v` adds a one-row-per-limit table and the working behind every number.
+Each name carries a colour and a few words about how full the week will be at its reset: 📗 **~N% to fill** (15 points or more on track to go unused), 📒 **~N% to fill** (5 to 15), 📙 **on pace to fill**, 📕 **runs out early** (it will run out before the reset, and the message gives the daily rate that would last), or 📓 **too early to tell** (under 12 hours into the week, so the comparison is with last week's pace). The colours read like a fuel gauge: green is the most quota still left to use, red a week that runs dry before its reset. `status -v` adds a one-row-per-limit table and the working behind every number.
 
 **Which Claude limit leads.** By default, Claude's messages follow the all-models limit. Some people run out of one model first; for me that's Fable. `QUOTA_WATCH_CLAUDE_LIMIT=fable` makes the Fable limit lead Claude's block and every Claude nudge, and moves all models into the quote.
 
 **Running out early.** The leading limit gets one more message: a warning when it is on course to run out at least 6 hours before its reset. It comes once when first seen and once more within a day of running out. It gives the daily rate that would last, and says whether other models still have room (made-up numbers):
 
 ```
-📙 Claude Fable will run out 2d 17h before its reset
+📕 Claude Fable will run out 2d 17h before its reset
 Resets Fri 25 Sep 18:35
 
 All models is at 40%: move work to other models
@@ -217,7 +217,7 @@ quota-watch щогодини читає обидва тижневі ліміти
 Тижневе нагадування із симуляції точки за 48 годин до скидання (цифри вигадані). Рядки з позначкою ▍ надсилаються як цитата, яку можна згорнути:
 
 ```
-📕 Codex: ~79% of this week will go unused
+📗 Codex: ~79% of this week will go unused
 Resets Wed 23 Sep 18:38
 
 ▍ 15% used · pace 3.0%/day → ~21% at reset
@@ -243,7 +243,7 @@ Resets Mon 28 Sep 16:00
 ▍ To use it all: 13.8%/day, 1.1× last week's 12%/day (it ended at 85%)
 ▍ Fable 6%
 
-📕 Codex · ~73% to fill
+📗 Codex · ~73% to fill
 Resets Sat 26 Sep 16:20
 
 ▍ 8% used · pace 3.8%/day → ~27% at reset
@@ -254,14 +254,14 @@ Resets Sat 26 Sep 16:20
 
 Якщо показання не вдалося оновити, блок каже про це після своїх цифр і не дає порад. Справжній приклад із запуску одразу після перезавантаження мого Мака: «Codex numbers are from Mon 21 Sep 19:22: the live check failed».
 
-Біля кожної назви стоїть колір і кілька слів про те, наскільки заповниться тиждень до скидання: 📕 **~N% to fill** (за прогнозом згорить 15 пунктів і більше), 📒 **~N% to fill** (від 5 до 15), 📗 **on pace to fill** (тиждень заповниться), 📙 **runs out early** (квота закінчиться до скидання, і повідомлення підкаже денну норму, якої вистачить) або 📓 **too early to tell** (минуло менше 12 годин тижня, тож порівняння йде з темпом минулого тижня). Кольори читаються як сигнали світлофора: червоний означає, що невикористаним лишається найбільше. `status -v` додає таблицю по рядку на ліміт і розрахунок за кожним числом.
+Біля кожної назви стоїть колір і кілька слів про те, наскільки заповниться тиждень до скидання: 📗 **~N% to fill** (за прогнозом згорить 15 пунктів і більше), 📒 **~N% to fill** (від 5 до 15), 📙 **on pace to fill** (тиждень заповниться), 📕 **runs out early** (квота закінчиться до скидання, і повідомлення підкаже денну норму, якої вистачить) або 📓 **too early to tell** (минуло менше 12 годин тижня, тож порівняння йде з темпом минулого тижня). Кольори читаються як покажчик рівня пального: зелений означає, що невикористаної квоти лишається найбільше, червоний — що її забракне ще до скидання. `status -v` додає таблицю по рядку на ліміт і розрахунок за кожним числом.
 
 **Який ліміт Claude головний.** Типово повідомлення про Claude стежать за лімітом на всі моделі. Дехто спершу вичерпує ліміт окремої моделі, у мене це Fable. `QUOTA_WATCH_CLAUDE_LIMIT=fable` робить ліміт Fable головним у блоці Claude і в усіх нагадуваннях про Claude, а ліміт на всі моделі переходить у цитату.
 
 **Квота закінчиться раніше.** Головний ліміт отримує ще одне повідомлення: попередження, коли за прогнозом він вичерпається щонайменше за 6 годин до скидання. Воно приходить раз, коли це вперше видно, і ще раз протягом доби до вичерпання. У ньому є денна норма, якої вистачить до скидання, і сказано, чи лишилось місце в інших моделях (цифри вигадані):
 
 ```
-📙 Claude Fable will run out 2d 17h before its reset
+📕 Claude Fable will run out 2d 17h before its reset
 Resets Fri 25 Sep 18:35
 
 All models is at 40%: move work to other models
