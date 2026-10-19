@@ -42,6 +42,9 @@ renderer is Pele (Obsidian's Mermaid renderer) plus resvg, run with Node on the 
   `mindmap`, `erDiagram`, `gantt`, `pie`, `quadrantChart`, `journey`.
 - **Colour** only when it carries meaning: `style A fill:#ffe08a` or a `classDef`. The
   default grey is the house look.
+- **Plain characters in labels:** letters, digits and ordinary punctuation. Mark a status
+  with colour or a word ("chosen", "ruled out"). A symbol the font lacks, such as ✓, ✗ or an
+  emoji, switches its whole line to a fallback font, bold and wider than the rest.
 
 ## Syntax that renders
 
