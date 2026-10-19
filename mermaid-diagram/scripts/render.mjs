@@ -5,17 +5,19 @@
 //
 // Success: prints `MEDIA:<absolute png path>` and a size line, exits 0.
 // Bad Mermaid: prints the line, column and reason to stderr, exits 2.
-// Dependencies missing: prints the one-time install command to stderr, exits 3.
+// Packages missing: prints the one-time install command to stderr, exits 3.
 //
 // Pele (Obsidian's Mermaid renderer) lays the diagram out in plain Node, with no
 // browser, and resvg turns the SVG into a PNG.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
+// Exact versions: Pele has no dependencies, and resvg pins its platform binaries to its own
+// version, so these two pins fix every installed file.
+const PACKAGES = ['pele@1.6.0', '@resvg/resvg-js@2.6.2'];
 const HERMES_HOME = process.env.HERMES_HOME || join(homedir(), '.hermes');
 // Outside the skill folder, so `hermes skills update` or a sync does not delete them.
 const DEPS = process.env.MERMAID_DIAGRAM_DEPS || join(HERMES_HOME, 'tools/mermaid-diagram');
@@ -30,12 +32,11 @@ const PHONE_WIDTH = 480;
 const MAX_SIDE_SUM = 9000;
 
 if (!existsSync(join(DEPS, 'node_modules/pele'))) {
-  const here = dirname(fileURLToPath(import.meta.url));
-  console.error(`mermaid-diagram: dependencies are not installed at ${DEPS}. Install once with:\n` +
-    `mkdir -p ${DEPS} && cp ${here}/package.json ${here}/package-lock.json ${DEPS}/ && npm ci --ignore-scripts --prefix ${DEPS}`);
+  console.error(`mermaid-diagram: the renderer's packages are not installed at ${DEPS}. Install them once with:\n` +
+    `npm install --ignore-scripts --no-audit --no-fund --prefix ${DEPS} ${PACKAGES.join(' ')}`);
   process.exit(3);
 }
-const require = createRequire(join(DEPS, 'package.json'));
+const require = createRequire(`${DEPS}/`);
 const { render, PeleError } = await import(require.resolve('pele'));
 const { Resvg } = require('@resvg/resvg-js');
 

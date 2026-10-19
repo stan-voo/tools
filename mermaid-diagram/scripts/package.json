@@ -1,9 +1,0 @@
-{
-  "name": "mermaid-diagram",
-  "private": true,
-  "description": "Dependencies for render.mjs, installed once into $HERMES_HOME/tools/mermaid-diagram",
-  "dependencies": {
-    "@resvg/resvg-js": "2.6.2",
-    "pele": "1.6.0"
-  }
-}
