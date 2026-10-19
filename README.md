@@ -10,7 +10,11 @@ Skills and small tools I build for working with coding agents, published when th
 
 ## Skills
 
-None yet. Each skill will get its own folder with a `SKILL.md`, installable with `npx skills add stan-voo/tools@<name>`.
+| Skill | What it does |
+|---|---|
+| [mermaid-diagram](mermaid-diagram/) | Lets a Hermes Agent answer in Telegram with a diagram as a picture. It writes Mermaid, renders a phone-sized PNG on the host with no browser, and sends it as a photo. Install with `hermes skills install stan-voo/tools/mermaid-diagram`. |
+
+Each skill has its own folder with a `SKILL.md`. A Hermes skill installs with `hermes skills install stan-voo/tools/<name>`, and one for Claude Code or a similar agent with `npx skills add stan-voo/tools@<name>`.
 
 ## License
 
@@ -26,4 +30,8 @@ MIT
 |---|---|
 | [quota-watch](quota-watch/) | Щогодини читає тижневі ліміти Claude Code і Codex та пише в Телеграм, поки частина тижня ще може згоріти невикористаною. Працює локально, лише на macOS, і не читає облікових даних Claude чи Codex. |
 
-Скілів поки немає. Кожен отримає власну папку з `SKILL.md`, і його можна буде встановити командою `npx skills add stan-voo/tools@<name>`.
+| Скіл | Що робить |
+|---|---|
+| [mermaid-diagram](mermaid-diagram/) | Дає агентові Hermes Agent відповідати в Телеграмі діаграмою-картинкою. Агент пише Mermaid, скрипт без браузера рендерить на сервері PNG під розмір телефона, і він приходить як фото. Встановлення: `hermes skills install stan-voo/tools/mermaid-diagram`. |
+
+Кожен скіл має власну папку з `SKILL.md`. Скіл для Hermes встановлюється командою `hermes skills install stan-voo/tools/<name>`, а для Claude Code чи схожого агента — `npx skills add stan-voo/tools@<name>`.
