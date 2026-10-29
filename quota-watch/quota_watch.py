@@ -30,6 +30,9 @@ Configuration, all optional, from the environment or from the env file
   QUOTA_WATCH_WINDOW_NUDGES 0 turns off the 5h window nudge (1)
   QUOTA_WATCH_WINDOW_LEAD   minutes before a 5h reset when it may fire (90)
   QUOTA_WATCH_WINDOW_ROOM   % of the window that must be unused (50)
+  QUOTA_WATCH_REST_DAYS     days you mostly rest, e.g. sat,sun: little use expected, no nudges (none)
+  QUOTA_WATCH_REST_WEIGHT   a rest day's use, as a share of a working day's (0.25)
+  QUOTA_WATCH_DAY_START     local hour a day begins; a night before it belongs to the day before (0)
   CLAUDE_BIN, CODEX_BIN     binaries, when they are not where they install
 """
 from __future__ import annotations
@@ -113,6 +116,17 @@ QUIET = tuple(int(h) for h in CONFIG.get("QUOTA_WATCH_QUIET", "23-8").split("-")
 WINDOW_NUDGES = CONFIG.get("QUOTA_WATCH_WINDOW_NUDGES", "1") != "0"
 WINDOW_LEAD = int(CONFIG.get("QUOTA_WATCH_WINDOW_LEAD", 90)) * 60   # minutes before its reset
 WINDOW_ROOM = float(CONFIG.get("QUOTA_WATCH_WINDOW_ROOM", 50))      # % of the window unused
+# Days the user mostly rests through, such as a weekend. A projection expects
+# REST_WEIGHT of a working day's use on each, every rate is per working day,
+# and no nudge goes out on one. None by default: every day counts in full.
+DAY_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+REST_DAYS = {DAY_NAMES.index(d.strip()[:3].lower()) for d in CONFIG.get("QUOTA_WATCH_REST_DAYS", "").split(",")
+             if d.strip()[:3].lower() in DAY_NAMES}
+REST_WEIGHT = max(0.0, float(CONFIG.get("QUOTA_WATCH_REST_WEIGHT", 0.25)))
+# The local hour a day begins, so a night's unattended run belongs to the day
+# it started on: a Friday-night job running to 07:00 is Friday's use, not Saturday's.
+DAY_START = int(CONFIG.get("QUOTA_WATCH_DAY_START", 0))
+DAY = "workday" if REST_DAYS else "day"
 
 # The limit that leads each tool's messages and nudges. Codex: its weekly
 # limit. Claude: the all-models limit by default, or a model-scoped one by name
@@ -425,28 +439,73 @@ def previous_close(r, rows):
 
 
 def recent_pace(r, rows, span=24 * 3600):
-    """%/s over roughly the last day, from history in the same window."""
-    older = [h for h in rows if h["pool"] == r["pool"] and same_window(h, r) and h["at"] <= r["at"] - span * 0.8]
+    """%/s over roughly the last working day, from history in the same window.
+    With rest days, a Monday morning reaches back through the weekend to Friday."""
+    older = [h for h in rows if h["pool"] == r["pool"] and same_window(h, r) and h["at"] <= r["at"] - span * 0.8
+             and worked(h["at"], r["at"]) >= span * 0.8]
     if not older:
         return None
     base = max(older, key=lambda h: h["at"])
-    return max(0.0, (r["used"] - base["used"]) / (r["at"] - base["at"]))
+    return max(0.0, (r["used"] - base["used"]) / worked(base["at"], r["at"]))
+
+
+# ── Rest days ───────────────────────────────────────────────────────────────
+
+def day_of(t):
+    """The local day `t` belongs to, days beginning at DAY_START, and when the next one begins."""
+    d = (dt.datetime.fromtimestamp(t) - dt.timedelta(hours=DAY_START)).date()
+    nxt = dt.datetime.combine(d + dt.timedelta(days=1), dt.time(DAY_START % 24)).timestamp()
+    return d, max(nxt, t + 60)   # a clock change must never stall the walk
+
+
+def is_rest(t):
+    return bool(REST_DAYS) and day_of(t)[0].weekday() in REST_DAYS
+
+
+def worked(a, b):
+    """Seconds from a to b, each second of a rest day counting REST_WEIGHT of one."""
+    if not REST_DAYS or b <= a:
+        return max(0, b - a)
+    total, t = 0.0, a
+    while t < b:
+        d, nxt = day_of(t)
+        seg = min(nxt, b) - t
+        total += seg * (REST_WEIGHT if d.weekday() in REST_DAYS else 1)
+        t += seg
+    return total
+
+
+def after_worked(a, s):
+    """The moment `s` worked seconds after `a`: worked(a, after_worked(a, s)) == s."""
+    if not REST_DAYS:
+        return a + s
+    t = a
+    for _ in range(60):   # further than any window; also ends a walk where every day weighs 0
+        d, nxt = day_of(t)
+        w = REST_WEIGHT if d.weekday() in REST_DAYS else 1
+        if w > 0 and s <= (nxt - t) * w:
+            return t + s / w
+        s -= (nxt - t) * w
+        t = nxt
+    return float("inf")
 
 
 # ── Projection ──────────────────────────────────────────────────────────────
 
 def project(r, rows, now):
+    # Every span is in working time: a rest day counts REST_WEIGHT of a day.
     elapsed = r["at"] - r["start"]
-    ahead = max(0, r["resets_at"] - r["at"])
+    done, ahead = worked(r["start"], r["at"]), worked(r["at"], r["resets_at"])
     p = dict(r, left=r["resets_at"] - now, elapsed=elapsed, pace=None, pace24=None,
-             projected=None, projected24=None, unused=None, full_at=None)
+             projected=None, projected24=None, unused=None, full_at=None,
+             worked_left=worked(now, r["resets_at"]), worked_week=worked(r["start"], r["resets_at"]))
     if now >= r["resets_at"]:
         p["rolled"] = True
         return p
     # What landing the week at 100% would take from here, as a daily rate.
     p["need"] = max(0.0, 100 - r["used"]) / max(ahead, 3600)
-    if elapsed >= MIN_ELAPSED:
-        p["pace"] = r["used"] / elapsed
+    if done >= MIN_ELAPSED:
+        p["pace"] = r["used"] / done
         p["projected"] = r["used"] + p["pace"] * ahead
     p["pace24"] = recent_pace(r, rows)
     if p["pace24"] is not None:
@@ -459,7 +518,7 @@ def project(r, rows, now):
         p["unused"] = max(0.0, 100 - busiest)
         rate = max(x for x in (p["pace"], p["pace24"]) if x is not None)
         if busiest > 100 and rate > 0:
-            p["full_at"] = r["at"] + (100 - r["used"]) / rate
+            p["full_at"] = after_worked(r["at"], (100 - r["used"]) / rate)
     p["prev"] = None if is_session(r) else previous_close(r, rows)
     return p
 
@@ -479,7 +538,7 @@ def when(ts, now=None):
 
 
 def per_day(pace):
-    return f"{pace * 86400:.1f}%/day"
+    return f"{pace * 86400:.1f}%/{DAY}"
 
 
 def short_dur(s):
@@ -533,7 +592,7 @@ def table_lines(ps, extras, now, rows=()):
             lines.append(f"{name:<{w}}{used:>5}{end:>6}{short_dur(p['left']):>7}{need:>8}")
             wpd = need != "·" and windows_per_day(p, ps, rows)
             if wpd:
-                notes.append(f"{name} need ≈ {wpd[0]:.1f} full 5h windows/day (one ≈ {wpd[1]:.0f}% of the week)")
+                notes.append(f"{name} need ≈ {wpd[0]:.1f} full 5h windows/{DAY} (one ≈ {wpd[1]:.0f}% of the week)")
         if p["full_at"] and p["full_at"] < p["resets_at"]:
             notes.append(f"{name.strip()} hits 100% ~{when(p['full_at'], now)}")
         if stale_note(p, now) and p.get("primary"):
@@ -606,12 +665,12 @@ def tool_block(p, ps, rows, now, header=None, shown=()):
     if r_day is None:
         lines.append(f"{p['used']:.0f}% used, {dur(p['elapsed'])} into the week")
     elif v == "ahead":
-        lines.append(f"{p['used']:.0f}% used · pace {r_day:.1f}%/day → runs out ~{when(p['full_at'], now)}")
+        lines.append(f"{p['used']:.0f}% used · pace {r_day:.1f}%/{DAY} → runs out ~{when(p['full_at'], now)}")
     else:
-        lines.append(f"{p['used']:.0f}% used · pace {r_day:.1f}%/day → ~{100 - p['unused']:.0f}% at reset")
-    extra, room = p["unused"], None
+        lines.append(f"{p['used']:.0f}% used · pace {r_day:.1f}%/{DAY} → ~{100 - p['unused']:.0f}% at reset")
+    extra, room, outer = p["unused"], None, outer_runs_out(p, ps)
     if v == "ahead":
-        lines.append(f"To last until reset: ≤ {need:.1f}%/day" + (f", {times(need / r_day)} your pace" if r_day else ""))
+        lines.append(f"To last until reset: ≤ {need:.1f}%/{DAY}" + (f", {times(need / r_day)} your pace" if r_day else ""))
         # A model-scoped limit running out while all-models has room: the
         # work can move to another model instead of stopping.
         room = next((s for s in siblings(p, ps) if s["pool"] == tool_of(p)), None)
@@ -619,21 +678,23 @@ def tool_block(p, ps, rows, now, header=None, shown=()):
             advice.append(f"All models is at {room['used']:.0f}%: move work to other models")
         else:
             room = None
+    elif outer:
+        advice.append(f"All models runs out ~{when(outer['full_at'], now)}: no room to fill this")
     elif v == "on track":
         advice.append("On pace to use it all")
     elif p["left"] >= MIN_LEFT:
         if r_day:
             base = f"{times(need / r_day)} your pace"
         elif p.get("prev"):
-            last_day = p["prev"]["used"] / 7
-            base = f"{times(need / last_day)} last week's {last_day:.0f}%/day (it ended at {p['prev']['used']:.0f}%)"
+            last_day = prev_rate(p) * 86400
+            base = f"{times(need / last_day)} last week's {last_day:.0f}%/{DAY} (it ended at {p['prev']['used']:.0f}%)"
             extra = expected_unused(p)
         else:
             base = None
-        lines.append(f"To use it all: {need:.1f}%/day" + (f", {base}" if base else ""))
+        lines.append(f"To use it all: {need:.1f}%/{DAY}" + (f", {base}" if base else ""))
         wpd = windows_per_day(p, ps, rows)
         if extra and wpd:
-            lines.append(f"≈ {wpd[0]:.1f} full 5h windows a day")
+            lines.append(f"≈ {wpd[0]:.1f} full 5h windows a {DAY}")
     subs = sorted((s for s in siblings(p, ps) if not s.get("rolled") and s is not room and s not in shown),
                   key=lambda s: not is_session(s))
     if subs:
@@ -644,23 +705,47 @@ def tool_block(p, ps, rows, now, header=None, shown=()):
     return "\n\n".join(x for x in ("\n".join(top), "" if note else "\n".join(advice), quoted(lines), note) if x)
 
 
+def prev_rate(p):
+    """Last week's average, %/s of working time. Its rest days fell where this week's do."""
+    return p["prev"]["used"] / max(p["worked_week"], 3600)
+
+
 def expected_unused(p):
     """Points of the week on track to go unused: at the pace so far, or, in a
     week too young for a pace, at last week's. None with neither."""
     if p["unused"] is not None:
         return p["unused"]
     if p.get("prev"):
-        return max(0.0, 100 - p["used"] - p["prev"]["used"] / 7 * p["left"] / 86400)
+        return max(0.0, 100 - p["used"] - prev_rate(p) * p["worked_left"])
     return None
 
 
-def window_advice(s, week, now):
+def outer_runs_out(p, ps):
+    """The all-models limit around a model-scoped one (Fable) when it is on
+    course to run out before its reset, else None."""
+    if p["pool"] == tool_of(p) or is_session(p):
+        return None
+    outer = next((s for s in siblings(p, ps) if s["pool"] == tool_of(p) and not s.get("rolled")), None)
+    return outer if outer and verdict(outer) == "ahead" else None
+
+
+def fillable(p, ps):
+    """Points of the week there is room to fill. For a model-scoped limit, none
+    while all models is on course to run out: every Fable point is an
+    all-models point too, so Fable's room could only be filled by running all
+    models dry before its reset."""
+    return 0.0 if outer_runs_out(p, ps) else expected_unused(p)
+
+
+def window_advice(s, week, now, ps=()):
     """What to do with a 5h window, given the week it counts toward. None when
     either reading is stale, or there is nothing to judge the week by."""
     if week is None or week.get("rolled") or stale_note(s, now) or stale_note(week, now):
         return None
     if verdict(week) == "ahead":
         return "Go easy: the week is on course to run out before its reset."
+    if outer_runs_out(week, ps):
+        return "Go easy: all models is on course to run out before its reset."
     unused = expected_unused(week)
     if unused is None:
         return None
@@ -671,12 +756,12 @@ def window_advice(s, week, now):
     return "Keep going: the week still has room to fill."
 
 
-def window_block(s, week, now):
+def window_block(s, week, now, ps=()):
     """A 5h window in the status message: how much is used, when it resets,
     and what to do with it."""
     top = [f"⏱ <b>{tool_of(s).capitalize()} 5h window: {s['used']:.0f}% used</b>",
            f"Resets {when(s['resets_at'], now)}, in {dur(s['left'])}"]
-    return "\n\n".join(x for x in ("\n".join(top), window_advice(s, week, now), stale_note(s, now)) if x)
+    return "\n\n".join(x for x in ("\n".join(top), window_advice(s, week, now, ps), stale_note(s, now)) if x)
 
 
 def by_tool(ps):
@@ -690,7 +775,7 @@ def status_message(ps, extras, rows, now):
         s = session_pool(p, ps)
         s = s if s and not s.get("rolled") else None
         if s:
-            blocks.append(window_block(s, p, now))
+            blocks.append(window_block(s, p, now, ps))
         blocks.append(tool_block(p, ps, rows, now, shown=[s] if s else ()))
     credits = (extras or {}).get("reset_credits", [])
     if credits and any(verdict(p) == "ahead" or p["used"] >= 90 for p in ps if p["pool"] == "codex"):
@@ -722,8 +807,10 @@ def detail_lines(ps, extras, now):
         else:
             bits = [f"pace since reset {per_day(p['pace'])} → {min(p['projected'], 100):.0f}% at reset"]
             if p["pace24"] is not None:
-                bits.append(f"last 24h {per_day(p['pace24'])} → {min(p['projected24'], 100):.0f}%")
+                bits.append(f"last {'workday' if REST_DAYS else '24h'} {per_day(p['pace24'])} → {min(p['projected24'], 100):.0f}%")
             lines.append("    " + ";  ".join(bits))
+        if REST_DAYS:
+            lines.append(f"    {p['worked_left'] / 86400:.1f} workdays left")
         if p["full_at"] and p["full_at"] < p["resets_at"]:
             lines.append(f"    on track to hit 100% around {when(p['full_at'], now)}")
         elif p["unused"] is not None:
@@ -736,6 +823,10 @@ def detail_lines(ps, extras, now):
     for c in (extras or {}).get("reset_credits", []):
         exp = f", expires {when(c['expires_at'], now)}" if c.get("expires_at") else ""
         lines.append(f"Codex reset credit available: {c.get('title') or 'reset'}{exp}")
+    if REST_DAYS:
+        rest = ", ".join(DAY_NAMES[d].capitalize() for d in sorted(REST_DAYS))
+        lines.append(f"Rates are per workday. {rest} each count as {REST_WEIGHT:g} of one, "
+                     f"and a day begins at {DAY_START:02d}:00. No nudges on {rest}.")
     return lines
 
 
@@ -763,7 +854,7 @@ def due_nudges(ps, fired, now):
     for p in ps:
         if not p.get("primary"):
             continue
-        if p.get("rolled") or p["unused"] is None or p["unused"] < GAP or p["left"] < MIN_LEFT:
+        if p.get("rolled") or p["unused"] is None or fillable(p, ps) < GAP or p["left"] < MIN_LEFT:
             continue
         # Not on a stale reading. The checkpoint stays unsent, so it goes out
         # on the next run that reads fresh.
@@ -813,7 +904,7 @@ def due_window_nudges(ps, fired, now, quiet):
         if not is_session(s) or s.get("rolled"):
             continue
         week = next((p for p in siblings(s, ps) if p.get("primary")), None)
-        if week is None or week.get("rolled") or week["unused"] is None or week["unused"] < GAP:
+        if week is None or week.get("rolled") or week["unused"] is None or fillable(week, ps) < GAP:
             continue
         if not 5 * 60 <= s["left"] <= WINDOW_LEAD or 100 - s["used"] < WINDOW_ROOM:
             continue
@@ -838,7 +929,7 @@ def window_text(due, all_ps, now, rows=()):
             f"Resets {when(s['resets_at'], now)}, in {dur(s['left'])}",
             f"The {short_name(week)} week (resets {when(week['resets_at'], now)}) is on track to leave "
             f"~{week['unused']:.0f}% unused.",
-            window_advice(s, week, now),
+            window_advice(s, week, now, all_ps),
             quoted([f"The unused part ≈ {room * wpd[1] / 100:.0f}% of the week"] if wpd else [])) if x))
     return "\n\n".join(blocks)
 
@@ -922,6 +1013,12 @@ def cmd_tick(dry_run):
     adue = due_ahead_nudges(ps, fired, now)
     wdue = due_window_nudges(ps, fired, now, quiet)
     if not due and not adue and not wdue:
+        return
+    # Nothing goes out on a rest day. What is due stays unsent, so a weekly
+    # checkpoint or a run-out warning that still holds goes out on the first
+    # tick of the next working day.
+    if is_rest(now):
+        log(f"rest day: holding {', '.join(p[0]['pool'] for p in due + adue + wdue)}")
         return
     text = tick_text(due, adue, wdue, ps, now, rows)
     if dry_run:

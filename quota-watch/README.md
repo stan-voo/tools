@@ -74,6 +74,10 @@ Each name carries a colour and a few words about how full the week will be at it
 
 **Which Claude limit leads.** By default, Claude's messages follow the all-models limit. Some people run out of one model first; for me that's Fable. `QUOTA_WATCH_CLAUDE_LIMIT=fable` makes the Fable limit lead Claude's block and every Claude nudge, and moves all models into the quote.
 
+While Fable leads and the all-models limit is on course to run out before its reset, Fable's unused room can't be spent: every Fable point counts toward all models too. Its block then says "All models runs out ~Mon 02 Nov 09:27: no room to fill this", and no under-use nudge goes out for Fable.
+
+**Weekends.** By default every day counts the same. If you mostly rest at weekends, `QUOTA_WATCH_REST_DAYS=sat,sun` tells the projection to expect only `QUOTA_WATCH_REST_WEIGHT` of a working day's use on each (0.25 by default), so a week that resets on a Monday is judged on the working days actually left. Rates then read per workday ("pace 15.7%/workday"), and nothing is sent on a rest day: a nudge still due holds until the first run on the next working day. `QUOTA_WATCH_DAY_START=7` moves the start of each day to 07:00, so a job that runs overnight counts toward the evening it started. My weekend days use 0.24 to 0.30 of a weekday's quota when each day starts at 07:00. Counted from midnight, my Saturdays looked as busy as a weekday, because Friday night's unattended run went on until 07:00.
+
 **Running out early.** The leading limit gets one more message: a warning when it is on course to run out at least 6 hours before its reset. It comes once when first seen and once more within a day of running out. It gives the daily rate that would last, and says whether other models still have room (made-up numbers):
 
 ```
@@ -127,7 +131,7 @@ codenotch is plainly better at everything else: a glanceable view, many provider
 - **The windows-per-day figure needs data.** It stays hidden until history holds at least one full window's worth of 5-hour movement, and it assumes the week-to-window ratio holds steady. Both limits report whole percents, so treat it as approximate.
 - **macOS.** Scheduling is a LaunchAgent, and the fallback is a macOS notification. The script is plain Python 3.9+ with no dependencies, so it should run from cron on Linux, but I have not tried it.
 - **It leans on undocumented internals.** Claude Code's `cachedUsageUtilization`, and a Codex app-server method that Codex marks experimental. Either can change in any release. `status` flags any reading older than 3 hours, and `status -v` names where each one came from, so a stale number shows up as stale.
-- **The projection is linear.** It assumes the rest of the week looks like the week so far, or like the last day. A holiday or a launch week breaks that. The 15-point margin absorbs small misses, not large ones.
+- **The projection is linear.** It assumes the rest of the week looks like the week so far, or like the last day. Rest days are the one exception it can model, as one fixed weight that you set. It does not learn the weight from your history. A holiday or a launch week breaks it. The 15-point margin absorbs small misses, not large ones.
 - **Last week's close is a floor.** Readings are hourly, so usage after the last reading before a reset is never seen.
 - **Codex from another machine can go unseen.** If the app-server call fails, quota-watch falls back to Codex's local session logs, which only move when Codex runs on this Mac.
 - **It says how much, not what.** It has no idea which of your tasks are heavy. Deciding what to queue is still your call.
@@ -179,6 +183,9 @@ All optional, in the environment or in `~/.config/quota-watch/env`:
 | `QUOTA_WATCH_WINDOW_NUDGES` | `1` | `0` turns off the 5-hour window nudge |
 | `QUOTA_WATCH_WINDOW_LEAD` | `90` | Minutes before a 5-hour reset when a window nudge may fire |
 | `QUOTA_WATCH_WINDOW_ROOM` | `50` | Percent of the window that must be unused |
+| `QUOTA_WATCH_REST_DAYS` | none | Days you mostly rest, such as `sat,sun`: little use expected, and no nudges |
+| `QUOTA_WATCH_REST_WEIGHT` | `0.25` | A rest day's use, as a share of a working day's |
+| `QUOTA_WATCH_DAY_START` | `0` | Local hour a day begins, so an overnight run counts toward the day before |
 | `CLAUDE_BIN`, `CODEX_BIN` | found automatically | Binaries, if they are not where they install |
 | `QUOTA_WATCH_ENV_FILE` | `~/.config/quota-watch/env` | Where settings are read from |
 
@@ -258,6 +265,10 @@ Resets Sat 26 Sep 16:20
 
 **Який ліміт Claude головний.** Типово повідомлення про Claude стежать за лімітом на всі моделі. Дехто спершу вичерпує ліміт окремої моделі, у мене це Fable. `QUOTA_WATCH_CLAUDE_LIMIT=fable` робить ліміт Fable головним у блоці Claude і в усіх нагадуваннях про Claude, а ліміт на всі моделі переходить у цитату.
 
+Поки головний Fable, а ліміт на всі моделі за прогнозом вичерпається до скидання, невикористане місце у Fable витратити не вийде: кожен пункт Fable зараховується й до всіх моделей. Тоді в його блоці стоїть «All models runs out ~Mon 02 Nov 09:27: no room to fill this», а нагадування про недовикористання Fable не надсилається.
+
+**Вихідні.** Типово всі дні важать однаково. Якщо у вихідні ви здебільшого відпочиваєте, `QUOTA_WATCH_REST_DAYS=sat,sun` каже прогнозу чекати в кожен такий день лише частку `QUOTA_WATCH_REST_WEIGHT` від використання робочого дня (типово 0.25). Тож тиждень, що скидається в понеділок, оцінюється за робочими днями, які справді лишилися. Темпи тоді рахуються на робочий день («pace 15.7%/workday»), а у вихідний нічого не надсилається: нагадування, яке досі на часі, чекає першого запуску наступного робочого дня. `QUOTA_WATCH_DAY_START=7` переносить початок дня на 07:00, тож задача, що працює вночі, зараховується до вечора, коли її запустили. Якщо день починати о 07:00, мій вихідний витрачає від 0.24 до 0.30 квоти буднього дня. Якщо рахувати від півночі, мої суботи виглядали так само завантаженими, як будні, бо нічний запуск без нагляду з п'ятниці тривав до 07:00.
+
 **Квота закінчиться раніше.** Головний ліміт отримує ще одне повідомлення: попередження, коли за прогнозом він вичерпається щонайменше за 6 годин до скидання. Воно приходить раз, коли це вперше видно, і ще раз протягом доби до вичерпання. У ньому є денна норма, якої вистачить до скидання, і сказано, чи лишилось місце в інших моделях (цифри вигадані):
 
 ```
@@ -311,7 +322,7 @@ quota-watch відрізняється чотирма речами. Підозр
 - **Кількості вікон на день потрібні дані.** Цей рядок не з'явиться, доки в історії не набереться рух хоча б на одне повне п'ятигодинне вікно. До того ж він припускає, що співвідношення тижня й вікна стабільне. Обидва ліміти звітують цілими відсотками, тож цифра приблизна.
 - **macOS.** Розклад тримається на LaunchAgent, а коли Телеграм недоступний, приходить сповіщення macOS. Сам скрипт написаний на чистому Python 3.9+ без залежностей, тож на Linux мав би працювати з cron, але я не перевіряв.
 - **Спирається на незадокументовані механізми.** Це `cachedUsageUtilization` у Claude Code і метод Codex app-server, який сам Codex позначає як експериментальний. Будь-який реліз може їх змінити. `status` позначає показання, старші за 3 години, а `status -v` показує, звідки взялося кожне, тож застаріле число видно як застаріле.
-- **Прогноз лінійний.** Він припускає, що решта тижня буде схожа на тиждень досі або на останню добу. Відпустка чи тиждень запуску це ламають. Запас у 15 пунктів поглинає дрібні промахи, а великі ні.
+- **Прогноз лінійний.** Він припускає, що решта тижня буде схожа на тиждень досі або на останню добу. Єдиний виняток, який він уміє врахувати, — вихідні, і то як одну сталу вагу, яку ви задаєте самі. З вашої історії він її не виводить. Відпустка чи тиждень запуску це ламають. Запас у 15 пунктів поглинає дрібні промахи, а великі ні.
 - **Цифра за минулий тиждень може бути заниженою.** Показання щогодинні, тож використання після останнього показання перед скиданням він не бачить.
 - **Codex з іншої машини може лишитись непоміченим.** Якщо виклик app-server не вдався, quota-watch бере дані з локальних логів сесій Codex, а вони оновлюються лише тоді, коли Codex працює на цьому Маку.
 - **Він каже скільки, а не що.** Він не знає, які з ваших задач важкі. Що поставити в чергу, вирішуєте ви.
@@ -363,5 +374,8 @@ python3 quota_watch.py backfill             # заповнити історію 
 | `QUOTA_WATCH_WINDOW_NUDGES` | `1` | `0` вимикає нагадування про п'ятигодинне вікно |
 | `QUOTA_WATCH_WINDOW_LEAD` | `90` | За скільки хвилин до скидання вікна може прийти нагадування |
 | `QUOTA_WATCH_WINDOW_ROOM` | `50` | Скільки відсотків вікна має лишатися невикористаним |
+| `QUOTA_WATCH_REST_DAYS` | немає | Дні, коли ви здебільшого відпочиваєте, наприклад `sat,sun`: прогноз чекає мало використання, нагадувань немає |
+| `QUOTA_WATCH_REST_WEIGHT` | `0.25` | Скільки використання припадає на вихідний як частка від робочого дня |
+| `QUOTA_WATCH_DAY_START` | `0` | О котрій за місцевим часом починається день, щоб нічний запуск зараховувався до попереднього дня |
 | `CLAUDE_BIN`, `CODEX_BIN` | визначаються автоматично | Шляхи до програм, якщо вони встановлені не там, де зазвичай |
 | `QUOTA_WATCH_ENV_FILE` | `~/.config/quota-watch/env` | Звідки читати налаштування |
