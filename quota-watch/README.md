@@ -68,7 +68,7 @@ Resets Sat 26 Sep 16:20
 
 The line under the 5-hour window is advice for that window, judged against its week: "A good moment to start something heavy" while the week has room to fill and the window is at least half unused, "Keep going: the week still has room to fill" once the window is more than half used, "Go easy: the week is on course to run out before its reset", or "On pace: no need to push". A week too young for a pace is judged by last week's.
 
-When a reading could not be refreshed, its block says so after its numbers and gives no advice. A real one, from a run just after my Mac rebooted: "Codex numbers are from Mon 21 Sep 19:22: the live check failed".
+When a reading could not be refreshed, its block says so after its numbers and gives no advice. A real one, from a run just after my Mac rebooted: "Codex numbers are from Mon 21 Sep 19:22: the live check failed". When the tool's binary was not found at all, the note says that instead and names the setting that fixes it: "no codex binary found; set CODEX_BIN".
 
 Each name carries a colour and a few words about how full the week will be at its reset: 📗 **~N% to fill** (15 points or more on track to go unused), 📒 **~N% to fill** (5 to 15), 📙 **on pace to fill**, 📕 **runs out early** (it will run out before the reset, and the message gives the daily rate that would last), or 📓 **too early to tell** (under 12 hours into the week, so the comparison is with last week's pace). The colours read like a fuel gauge: green is the most quota still left to use, red a week that runs dry before its reset. `status -v` adds a one-row-per-limit table and the working behind every number.
 
@@ -259,7 +259,7 @@ Resets Sat 26 Sep 16:20
 
 Рядок під п'ятигодинним вікном дає пораду саме щодо цього вікна з огляду на його тиждень: «A good moment to start something heavy», поки в тижні лишається місце, а вікно використане не більше ніж наполовину; «Keep going: the week still has room to fill», коли вікно використане більше ніж наполовину; «Go easy: the week is on course to run out before its reset»; або «On pace: no need to push». Якщо тиждень надто молодий і темпу ще немає, його оцінюють за темпом минулого тижня.
 
-Якщо показання не вдалося оновити, блок каже про це після своїх цифр і не дає порад. Справжній приклад із запуску одразу після перезавантаження мого Мака: «Codex numbers are from Mon 21 Sep 19:22: the live check failed».
+Якщо показання не вдалося оновити, блок каже про це після своїх цифр і не дає порад. Справжній приклад із запуску одразу після перезавантаження мого Мака: «Codex numbers are from Mon 21 Sep 19:22: the live check failed». Якщо саму програму не знайдено, примітка так і каже й називає налаштування, яке це виправить: «no codex binary found; set CODEX_BIN».
 
 Біля кожної назви стоїть колір і кілька слів про те, наскільки заповниться тиждень до скидання: 📗 **~N% to fill** (за прогнозом згорить 15 пунктів і більше), 📒 **~N% to fill** (від 5 до 15), 📙 **on pace to fill** (тиждень заповниться), 📕 **runs out early** (квота закінчиться до скидання, і повідомлення підкаже денну норму, якої вистачить) або 📓 **too early to tell** (минуло менше 12 годин тижня, тож порівняння йде з темпом минулого тижня). Кольори читаються як покажчик рівня пального: зелений означає, що невикористаної квоти лишається найбільше, червоний — що її забракне ще до скидання. `status -v` додає таблицю по рядку на ліміт і розрахунок за кожним числом.
 

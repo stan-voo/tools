@@ -93,8 +93,10 @@ CLAUDE_BIN = first_executable(CONFIG.get("CLAUDE_BIN"), os.path.join(HOME, ".loc
 CLAUDE_CWD = os.path.join(STATE, "claude-usage-cwd")
 CLAUDE_MAX_AGE = int(CONFIG.get("QUOTA_WATCH_CLAUDE_MAX_AGE", 20 * 60))  # refresh when older
 CODEX_SESSIONS = os.path.join(CONFIG.get("CODEX_HOME") or os.path.join(HOME, ".codex"), "sessions")
+# By November 2026 the ChatGPT app ships its CLI in codex-cli/bin/; the older paths stay for older installs.
 CODEX_BIN = first_executable(CONFIG.get("CODEX_BIN"), shutil.which("codex"), "/opt/homebrew/bin/codex",
-                             "/usr/local/bin/codex", "/Applications/ChatGPT.app/Contents/Resources/codex",
+                             "/usr/local/bin/codex", "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+                             "/Applications/ChatGPT.app/Contents/Resources/codex",
                              "/Applications/Codex.app/Contents/Resources/codex")
 
 WEEK = 7 * 86400
@@ -643,7 +645,10 @@ def stale_note(p, now):
     """Said plainly when this run could not refresh a reading, else None."""
     if now - p["at"] <= STALE:
         return None
-    return f"<i>{tool_of(p).capitalize()} numbers are from {when(p['at'], now)}: the live check failed</i>"
+    tool = tool_of(p)
+    found = {"claude": CLAUDE_BIN, "codex": CODEX_BIN}.get(tool, True)
+    cause = "the live check failed" if found else f"no {tool} binary found; set {tool.upper()}_BIN"
+    return f"<i>{tool.capitalize()} numbers are from {when(p['at'], now)}: {cause}</i>"
 
 
 def quoted(lines):
